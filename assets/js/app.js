@@ -40,9 +40,21 @@ function renderKPIs(){
 function filteredList(){
   const type=$("typeFilter").value;
   const q=($("qSearch").value||"").trim().toLowerCase();
+
+  // Filtro por intervalo de datas (YYYY-MM-DD). Comparação de string funciona nesse formato.
+  const df=($("dateFrom")?.value||"").trim();
+  const dt=($("dateTo")?.value||"").trim();
+
   return monthFilteredTx().filter(t=>{
     if(type!=="ALL"&&t.type!==type) return false;
-    if(q){ const blob=`${t.desc} ${t.cat}`.toLowerCase(); if(!blob.includes(q)) return false; }
+
+    if(df && String(t.date) < df) return false;
+    if(dt && String(t.date) > dt) return false;
+
+    if(q){
+      const blob=`${t.desc} ${t.cat}`.toLowerCase();
+      if(!blob.includes(q)) return false;
+    }
     return true;
   }).sort((a,b)=>b.date.localeCompare(a.date));
 }
@@ -50,11 +62,44 @@ function filteredList(){
 function renderTxList(){
   const list=filteredList();
   $("txCount").textContent=`${list.length} itens`;
+
   let sum=0; for(const t of list) sum+=signedAmount(t);
   $("txSum").textContent=brl(sum);
 
-  const wrap=$("txList"); wrap.innerHTML="";
+  // Texto do período aplicado (no estilo "extrato")
+  const df=($("dateFrom")?.value||"").trim();
+  const dt=($("dateTo")?.value||"").trim();
+  if(df||dt){
+    const a=df?humanDate(df):"—";
+    const b=dt?humanDate(dt):"—";
+    $("txRange").textContent=`Período: ${a} → ${b}`;
+  }else{
+    $("txRange").textContent="Período: mês selecionado";
+  }
+
+  // Pré-calcula total por dia (somando entradas e saídas do filtro atual)
+  const dayTotal=new Map();
   for(const t of list){
+    dayTotal.set(t.date,(dayTotal.get(t.date)||0)+signedAmount(t));
+  }
+
+  const wrap=$("txList"); wrap.innerHTML="";
+  let currentDay=null;
+
+  for(const t of list){
+    if(t.date!==currentDay){
+      currentDay=t.date;
+      const net=dayTotal.get(currentDay)||0;
+      const netClass=net>=0?"text-success":"text-danger";
+      const head=document.createElement("div");
+      head.className="tx-day";
+      head.innerHTML=`
+        <div class="date"><i class="bi bi-calendar3 me-1"></i>${humanDate(currentDay)}</div>
+        <div class="day-total ${netClass}">${brl(Math.abs(net))}${net<0?"-":""}</div>
+      `;
+      wrap.appendChild(head);
+    }
+
     const isIn=t.type==="IN";
     const val=Math.abs(Number(t.amount||0));
     const icon=isIn?"bi-arrow-down-left":"bi-arrow-up-right";
@@ -62,6 +107,7 @@ function renderTxList(){
 
     const el=document.createElement("div");
     el.className="tx-item";
+    el.setAttribute("data-type", t.type);
     el.innerHTML=`
       <div class="d-flex justify-content-between gap-2">
         <div class="d-flex gap-2">
@@ -70,7 +116,7 @@ function renderTxList(){
           </div>
           <div>
             <div class="fw-semibold">${escapeHtml(t.desc)}</div>
-            <div class="small text-secondary">${humanDate(t.date)} • <span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
+            <div class="small text-secondary"><span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
           </div>
         </div>
         <div class="text-end">
@@ -221,23 +267,39 @@ function setupNav(){
   });
 }
 function setupFilters(){
+  // espelha os controles do topo para o offcanvas
   $("qSearch2").value=$("qSearch").value;
   $("typeFilter2").value=$("typeFilter").value;
 
-  $("btnApplyFilters").addEventListener("click",()=>{
+  // inicializa filtro de data vazio
+  if($("dateFrom")) $("dateFrom").value = "";
+  if($("dateTo")) $("dateTo").value = "";
+
+  const apply=()=>{
     $("qSearch").value=$("qSearch2").value;
     $("typeFilter").value=$("typeFilter2").value;
+
     bootstrap.Offcanvas.getInstance($("filters")).hide();
     renderTxList();
-  });
+  };
+
+  $("btnApplyFilters").addEventListener("click", apply);
+
   $("btnClearFilters").addEventListener("click",()=>{
     $("qSearch").value=""; $("qSearch2").value="";
     $("typeFilter").value="ALL"; $("typeFilter2").value="ALL";
+    if($("dateFrom")) $("dateFrom").value="";
+    if($("dateTo")) $("dateTo").value="";
     bootstrap.Offcanvas.getInstance($("filters")).hide();
     renderTxList(); toast("Filtros limpos.");
   });
+
   $("qSearch").addEventListener("input",()=>{ $("qSearch2").value=$("qSearch").value; renderTxList(); });
   $("typeFilter").addEventListener("change",()=>{ $("typeFilter2").value=$("typeFilter").value; renderTxList(); });
+
+  // quando mexer nas datas, já atualiza o "extrato"
+  $("dateFrom")?.addEventListener("change",()=>renderTxList());
+  $("dateTo")?.addEventListener("change",()=>renderTxList());
 }
 function setup(){
   rebuildMonthSelect(); ensureCatSelect();
