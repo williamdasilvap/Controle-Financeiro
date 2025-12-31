@@ -33,6 +33,26 @@ if(!Array.isArray(state.recurring)) state.recurring=[];
 let filterFrom="";
 let filterTo="";
 
+// ==============================
+// Privacidade: ocultar/mostrar valores
+// ==============================
+const MASK_VAL = "R$ *,**";
+let hideSaldo = (localStorage.getItem("pref_hide_saldo") ?? "1") === "1";
+function setHideSaldo(v){
+  hideSaldo = !!v;
+  localStorage.setItem("pref_hide_saldo", hideSaldo ? "1" : "0");
+  updateSaldoEyeUI();
+  refreshAll();
+}
+function mbrl(v){ return hideSaldo ? MASK_VAL : brl(v); }
+function updateSaldoEyeUI(){
+  const icon = hideSaldo ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+  const b1 = $("btnToggleSaldo");
+  const b2 = $("btnToggleSaldoTx");
+  if(b1) b1.innerHTML = icon;
+  if(b2) b2.innerHTML = icon + '<span class="small fw-semibold">saldo</span>';
+}
+
 function toast(msg){ $("toastBody").textContent=msg; $("toastTime").textContent="agora"; new bootstrap.Toast($("appToast")).show(); }
 function setLastUpdate(){ $("lastUpdate").textContent=new Date().toLocaleString("pt-BR"); }
 function signedAmount(t){ const v=Number(t.amount||0); return t.type==="OUT"?-Math.abs(v):Math.abs(v); }
@@ -151,7 +171,7 @@ function kpis(){
 }
 function renderKPIs(){
   const {ins,outs,net,saldo}=kpis();
-  $("kSaldo").textContent=brl(saldo); $("kIn").textContent=brl(ins); $("kOut").textContent=brl(outs); $("kNet").textContent=brl(net);
+  $("kSaldo").textContent=mbrl(saldo); $("kIn").textContent=mbrl(ins); $("kOut").textContent=mbrl(outs); $("kNet").textContent=mbrl(net);
   setLastUpdate();
 }
 
@@ -181,7 +201,7 @@ function renderTxList(){
 
   $("txCount").textContent=`${listDesc.length} itens`;
   let sum=0; for(const t of listAsc) sum+=signedAmount(t);
-  $("txSum").textContent=brl(sum);
+  $("txSum").textContent=mbrl(sum);
   $("txRangeLabel").textContent=activePeriodLabel();
 
   // saldo anterior ao período (sempre calculado com TODOS os lançamentos, sem filtro de tipo/busca)
@@ -214,7 +234,7 @@ function renderTxList(){
         <div class="fw-semibold">Saldo anterior</div>
         <div class="small text-secondary">antes de ${humanDate(start)}</div>
       </div>
-      <div class="text-end fw-semibold">${brl(saldoAnterior)}</div>
+      <div class="text-end fw-semibold">${mbrl(saldoAnterior)}</div>
     </div>`;
   wrap.appendChild(head);
 
@@ -235,11 +255,11 @@ function renderTxList(){
       <div class="tx-day-head">
         <div>
           <div class="fw-semibold">${humanDate(day)}</div>
-          <div class="small text-secondary">Movimento do dia: <span class="${daySum>=0?"text-success":"text-danger"}">${brl(daySum)}</span></div>
+          <div class="small text-secondary">Movimento do dia: <span class="${daySum>=0?"text-success":"text-danger"}">${mbrl(daySum)}</span></div>
         </div>
         <div class="text-end">
           <div class="small text-secondary">Saldo</div>
-          <div class="fw-semibold">${brl(saldoDia)}</div>
+          <div class="fw-semibold">${mbrl(saldoDia)}</div>
         </div>
       </div>
       <div class="tx-day-body"></div>
@@ -266,7 +286,7 @@ function renderTxList(){
             </div>
           </div>
           <div class="text-end">
-            <div class="fw-semibold ${color}">${brl(val)}</div>
+            <div class="fw-semibold ${color}">${mbrl(val)}</div>
             <div class="d-flex justify-content-end gap-1 mt-1">
               <button class="btn btn-sm btn-outline-secondary" data-edit="${t.id}"><i class="bi bi-pencil"></i></button>
               <button class="btn btn-sm btn-outline-danger" data-del="${t.id}"><i class="bi bi-trash3"></i></button>
@@ -292,7 +312,8 @@ function renderTxList(){
 }
 
 
-function renderCategory(){
+
+function renderCategoryBars(){
   const monthTx=monthFilteredTx().filter(t=>t.type==="OUT");
   const map=new Map();
   for(const t of monthTx){
@@ -300,46 +321,69 @@ function renderCategory(){
     map.set(c,(map.get(c)||0)+Math.abs(Number(t.amount||0)));
   }
   const sorted=Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10);
-  renderCategoryChart($("chartCat"), sorted.map(x=>x[0]), sorted.map(x=>Math.round(x[1])));
-  $("catList").innerHTML=sorted.map(([c,v])=>`
-    <div class="tx-item"><div class="d-flex align-items-center justify-content-between">
-      <div class="fw-semibold">${escapeHtml(c)}</div><div class="fw-semibold">${brl(v)}</div>
-    </div></div>`).join("") || `<div class="small text-secondary">Sem gastos no mês.</div>`;
-}
-
-function renderDaily(){
-  const now=new Date(); const from=new Date(now); from.setDate(now.getDate()-29);
-  const mapIn=new Map(); const mapOut=new Map();
-  for(let i=0;i<30;i++){ const d=new Date(from); d.setDate(from.getDate()+i); const key=ymd(d); mapIn.set(key,0); mapOut.set(key,0); }
-  for(const t of state.transactions){
-    if(!mapIn.has(t.date)) continue;
-    const v=Math.abs(Number(t.amount||0));
-    if(t.type==="IN") mapIn.set(t.date,mapIn.get(t.date)+v); else mapOut.set(t.date,mapOut.get(t.date)+v);
+  const wrap=$("catBars");
+  if(!wrap) return;
+  if(!sorted.length){
+    wrap.innerHTML = `<div class="small text-secondary">Sem gastos no mês.</div>`;
+    return;
   }
-  const labels=Array.from(mapIn.keys()).map(k=>k.slice(5));
-  const inVals=Array.from(mapIn.values()).map(v=>Math.round(v));
-  const outVals=Array.from(mapOut.values()).map(v=>Math.round(v));
-  const balanceVals=[]; let bal=0; for(let i=0;i<labels.length;i++){ bal += (inVals[i]||0) - (outVals[i]||0); balanceVals.push(Math.round(bal)); }
-  renderDailyChart($("chartDaily"), labels, inVals, outVals, balanceVals);
+  const total = sorted.reduce((a,[_c,v])=>a+v,0) || 0;
+  wrap.innerHTML = sorted.map(([c,v])=>{
+    const pct = total>0 ? (v/total)*100 : 0;
+    return `
+      <div class="tx-item py-2">
+        <div class="d-flex justify-content-between align-items-center gap-2">
+          <div class="fw-semibold">${escapeHtml(c)}</div>
+          <div class="fw-semibold">${mbrl(v)}</div>
+        </div>
+        <div class="progress mt-2" style="height:10px;border-radius:999px;">
+          <div class="progress-bar" role="progressbar" style="width:${Math.min(100, Math.round(pct))}%"></div>
+        </div>
+        <div class="small text-secondary mt-1">${pct.toFixed(1)}%</div>
+      </div>
+    `;
+  }).join("");
 }
 
+function renderMonthsBars(){
+  const wrap=$("monthsBars");
+  if(!wrap) return;
 
-function renderMonthly(){
   // últimos 6 meses (incluindo o atual)
-  const months=getMonths().slice(0,6).reverse(); // asc para ficar bonito
-  const inMap=new Map(); const outMap=new Map();
-  for(const m of months){ inMap.set(m,0); outMap.set(m,0); }
+  const months=getMonths().slice(0,6).reverse();
+  const outMap=new Map();
+  for(const m of months) outMap.set(m,0);
+
   for(const t of state.transactions){
     const m=monthKeyFromYMD(t.date);
-    if(!inMap.has(m)) continue;
-    const v=Math.abs(Number(t.amount||0));
-    if(t.type==="IN") inMap.set(m,inMap.get(m)+v); else outMap.set(m,outMap.get(m)+v);
+    if(!outMap.has(m)) continue;
+    if(t.type!=="OUT") continue;
+    outMap.set(m, outMap.get(m) + Math.abs(Number(t.amount||0)));
   }
-  const labels=months.map(monthLabel);
-  const inVals=months.map(m=>Math.round(inMap.get(m)||0));
-  const outVals=months.map(m=>Math.round(outMap.get(m)||0));
-  const canvas=$("chartMonths");
-  if(canvas) renderMonthlyChart(canvas, labels, inVals, outVals);
+
+  const vals = months.map(m=>outMap.get(m)||0);
+  const max = Math.max(...vals, 1);
+
+  if(!months.length){
+    wrap.innerHTML = `<div class="small text-secondary">Sem dados.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = months.map((m,i)=>{
+    const v = vals[i] || 0;
+    const pct = (v/max)*100;
+    return `
+      <div class="tx-item py-2">
+        <div class="d-flex justify-content-between align-items-center gap-2">
+          <div class="fw-semibold">${monthLabel(m)}</div>
+          <div class="fw-semibold text-danger">${mbrl(v)}</div>
+        </div>
+        <div class="progress mt-2" style="height:10px;border-radius:999px;">
+          <div class="progress-bar bg-danger" role="progressbar" style="width:${Math.min(100, Math.round(pct))}%"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 
@@ -377,7 +421,7 @@ function renderBudgets(){
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
             <div class="fw-semibold">${escapeHtml(b.cat)}</div>
-            <div class="small text-secondary">${brl(spent)} de ${brl(limit)} • <span class="badge-soft">${status}</span></div>
+            <div class="small text-secondary">${mbrl(spent)} de ${mbrl(limit)} • <span class="badge-soft">${status}</span></div>
           </div>
           <div class="d-flex gap-1">
             <button class="btn btn-sm btn-outline-secondary" data-bedit="${b.id}"><i class="bi bi-pencil"></i></button>
@@ -438,7 +482,7 @@ function renderBudgetAlerts(){
     <div class="tx-item">
       <div class="d-flex justify-content-between align-items-center gap-2">
         <div class="fw-semibold">${escapeHtml(a.txt)}</div>
-        <span class="badge bg-${a.level}">${brl(a.spent)} / ${brl(a.limit)}</span>
+        <span class="badge bg-${a.level}">${mbrl(a.spent)} / ${mbrl(a.limit)}</span>
       </div>
     </div>
   `).join("");
@@ -464,7 +508,7 @@ function renderTopExpenses(){
           <div class="fw-semibold">${i+1}. ${escapeHtml(t.desc)}</div>
           <div class="small text-secondary">${humanDate(t.date)} • <span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
         </div>
-        <div class="fw-semibold text-danger">${brl(Math.abs(Number(t.amount||0)))}</div>
+        <div class="fw-semibold text-danger">${mbrl(Math.abs(Number(t.amount||0)))}</div>
       </div>
     </div>
   `).join("");
@@ -497,7 +541,7 @@ function saveBudgetFromModal(){
   bootstrap.Modal.getInstance($("modalBudget"))?.hide();
 }
 
-function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderDaily(); renderMonthly(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
+function refreshAll(){renderKPIs(); renderTxList(); renderCategoryBars(); renderMonthsBars(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
 function persistAndRefresh(msg){ saveState(state); rebuildMonthSelect(); ensureCatSelect(); refreshAll(); if(msg) toast(msg); }
 
 function openModalNew(){
@@ -628,7 +672,7 @@ function setupTheme(){
     $("btnTheme").innerHTML=next==="dark"?'<i class="bi bi-sun"></i>':'<i class="bi bi-moon-stars"></i>';
   };
   $("btnTheme").addEventListener("click",toggle);
-  $("bnTheme").addEventListener("click",toggle);
+  $("bnTheme")?.addEventListener("click",toggle);
 }
 function showView(name){
   $("view-home").classList.toggle("d-none",name!=="home");
@@ -718,6 +762,10 @@ function setup(){
   $("btnAddTx").addEventListener("click",openModalNew);
   $("btnSaveTx").addEventListener("click",saveTxFromModal);
 
+  $("btnToggleSaldo")?.addEventListener("click", ()=> setHideSaldo(!hideSaldo));
+  $("btnToggleSaldoTx")?.addEventListener("click", ()=> setHideSaldo(!hideSaldo));
+  updateSaldoEyeUI();
+
   // UI: mostrar/ocultar opções de recorrência
   if($("txRecurring")){
     $("txRecurring").addEventListener("change",()=>{
@@ -743,10 +791,6 @@ function setup(){
     if(!confirm("Zerar todos os dados salvos?")) return;
     resetState(); state=emptyState(); persistAndRefresh("Dados zerados.");
   });
-
-  $("btnToday").addEventListener("click",()=>{
-    $("monthSelect").value=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
-    refreshAll();
   });
 
   saveState(state); refreshAll();
