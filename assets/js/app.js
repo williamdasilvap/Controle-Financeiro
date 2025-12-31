@@ -1,5 +1,19 @@
-import { loadState, saveState, resetState } from "./storage.js";
-import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./format.js";
+// app.bundle.js (gerado)
+
+function brl(n){ const v=Number(n||0); return v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); }
+function ymd(date){ const d=new Date(date); const yyyy=d.getFullYear(); const mm=String(d.getMonth()+1).padStart(2,"0"); const dd=String(d.getDate()).padStart(2,"0"); return `${yyyy}-${mm}-${dd}`; }
+function humanDate(ymdStr){ const [y,m,d]=ymdStr.split("-"); return `${d}/${m}/${y}`; }
+function parseMoney(v){ let s=String(v??"").trim(); if(!s) return 0; s=s.replaceAll("R$","").trim(); if(s.includes(",")&&!s.includes(".")) s=s.replaceAll(".","").replaceAll(",","."); if(s.includes(".")&&s.includes(",")) s=s.replaceAll(".","").replaceAll(",","."); const n=Number(s); return Number.isFinite(n)?n:0; }
+function monthKeyFromYMD(ymdStr){ return String(ymdStr).slice(0,7); }
+function monthLabel(yyyyMM){ const [y,m]=yyyyMM.split("-"); const names=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]; return `${names[Number(m)-1]}/${y}`; }
+
+
+const KEY = "controle_financeiro_v2_mobile";
+function loadState(){ try{ const raw = localStorage.getItem(KEY); return raw?JSON.parse(raw):null; } catch { return null; } }
+function saveState(state){ localStorage.setItem(KEY, JSON.stringify(state)); }
+function resetState(){ localStorage.removeItem(KEY); }
+
+
 
 const $ = (id) => document.getElementById(id);
 
@@ -1179,3 +1193,4 @@ setupNav();
 setupFilters();
 setup();
 showView("home");
+
