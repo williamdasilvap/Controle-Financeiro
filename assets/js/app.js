@@ -1,6 +1,6 @@
 import { loadState, saveState, resetState } from "./storage.js";
 import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./format.js";
-import { destroyCharts, renderDailyChart, renderMonthlyChart, setChartsPrivacy } from "./charts.js";
+import { destroyCharts, setChartsPrivacy } from "./charts.js";
 const $=(id)=>document.getElementById(id);
 
 // ==============================
@@ -364,39 +364,46 @@ function renderCategory(){
   }
 }
 
-function renderDaily(){
-  const now=new Date(); const from=new Date(now); from.setDate(now.getDate()-29);
-  const mapIn=new Map(); const mapOut=new Map();
-  for(let i=0;i<30;i++){ const d=new Date(from); d.setDate(from.getDate()+i); const key=ymd(d); mapIn.set(key,0); mapOut.set(key,0); }
-  for(const t of state.transactions){
-    if(!mapIn.has(t.date)) continue;
-    const v=Math.abs(Number(t.amount||0));
-    if(t.type==="IN") mapIn.set(t.date,mapIn.get(t.date)+v); else mapOut.set(t.date,mapOut.get(t.date)+v);
-  }
-  const labels=Array.from(mapIn.keys()).map(k=>k.slice(5));
-  const inVals=Array.from(mapIn.values()).map(v=>Math.round(v));
-  const outVals=Array.from(mapOut.values()).map(v=>Math.round(v));
-  const balanceVals=[]; let bal=0; for(let i=0;i<labels.length;i++){ bal += (inVals[i]||0) - (outVals[i]||0); balanceVals.push(Math.round(bal)); }
-  renderDailyChart($("chartDaily"), labels, inVals, outVals, balanceVals);
-}
-
-
 function renderMonthly(){
-  // últimos 6 meses (incluindo o atual)
-  const months=getMonths().slice(0,6).reverse(); // asc para ficar bonito
-  const inMap=new Map(); const outMap=new Map();
-  for(const m of months){ inMap.set(m,0); outMap.set(m,0); }
+  // Gastos (últimos 6 meses) em barras Bootstrap (participação no total)
+  const el = $("monthBars");
+  if(!el) return;
+
+  const months = getMonths().slice(0,6).reverse(); // asc
+  const outMap = new Map();
+  for(const m of months) outMap.set(m,0);
+
   for(const t of state.transactions){
-    const m=monthKeyFromYMD(t.date);
-    if(!inMap.has(m)) continue;
-    const v=Math.abs(Number(t.amount||0));
-    if(t.type==="IN") inMap.set(m,inMap.get(m)+v); else outMap.set(m,outMap.get(m)+v);
+    const m = monthKeyFromYMD(t.date);
+    if(!outMap.has(m)) continue;
+    if(t.type !== "OUT") continue;
+    const v = Math.abs(Number(t.amount||0));
+    outMap.set(m, outMap.get(m) + v);
   }
-  const labels=months.map(monthLabel);
-  const inVals=months.map(m=>Math.round(inMap.get(m)||0));
-  const outVals=months.map(m=>Math.round(outMap.get(m)||0));
-  const canvas=$("chartMonths");
-  if(canvas) renderMonthlyChart(canvas, labels, inVals, outVals);
+
+  const items = months.map(m=>({ key:m, label: monthLabel(m), val: Math.round(outMap.get(m)||0) }));
+  const total = items.reduce((s,it)=>s+Number(it.val||0),0) || 0;
+
+  if(total===0){
+    el.innerHTML = `<div class="text-secondary small">Sem gastos no período.</div>`;
+    return;
+  }
+
+  el.innerHTML = items.map(it=>{
+    const pct = total>0 ? (it.val/total)*100 : 0;
+    const pctTxt = pct.toFixed(1);
+    return `
+      <div class="mb-2">
+        <div class="d-flex justify-content-between small">
+          <div class="text-truncate me-2">${escapeHtml(it.label)}</div>
+          <div>${pctTxt}%</div>
+        </div>
+        <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar" style="width:${pct}%"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 
@@ -554,7 +561,7 @@ function saveBudgetFromModal(){
   bootstrap.Modal.getInstance($("modalBudget"))?.hide();
 }
 
-function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderDaily(); renderMonthly(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
+function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderMonthly(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
 function persistAndRefresh(msg){ saveState(state); rebuildMonthSelect(); ensureCatSelect(); refreshAll(); if(msg) toast(msg); }
 
 function openModalNew(){
@@ -824,7 +831,7 @@ function setup(){
     resetState(); state=emptyState(); persistAndRefresh("Dados zerados.");
   });
 
-  $("btnToday").addEventListener("click",()=>{
+  $("btnToday")?.addEventListener("click",()=>{
     $("monthSelect").value=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
     refreshAll();
   });
