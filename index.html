@@ -72,7 +72,15 @@
         <div class="d-flex align-items-start justify-content-between">
           <div>
             <div class="text-secondary small">Saldo atual</div>
-            <div class="display-6 fw-semibold" id="kSaldo">R$ 0,00</div>
+
+            <!-- saldo + botão mostrar/ocultar -->
+            <div class="d-flex align-items-center gap-2">
+              <div class="display-6 fw-semibold" id="kSaldo">R$ ***</div>
+              <button class="btn btn-sm btn-outline-secondary" id="btnToggleSaldo" title="Mostrar/ocultar saldo">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+
             <div class="small text-secondary"><i class="bi bi-clock-history me-1"></i><span id="lastUpdate">—</span></div>
           </div>
           <span class="badge-soft"><i class="bi bi-lock"></i> local</span>
@@ -161,7 +169,7 @@
     </section>
 
     <section id="view-tx" class="view d-none">
-      <div class="mt-3 d-flex gap-2">
+      <div class="mt-3 d-flex gap-2 flex-wrap">
         <div class="pill flex-grow-1">
           <i class="bi bi-funnel"></i>
           <select class="form-select form-select-sm border-0 bg-transparent" id="typeFilter">
@@ -170,6 +178,13 @@
             <option value="OUT">Gastos</option>
           </select>
         </div>
+
+        <!-- (Ajuste sugerido) modo do saldo no extrato -->
+        <button class="pill" id="btnSaldoMode" type="button" title="Alternar saldo real/filtrado">
+          <i class="bi bi-calculator"></i>
+          <span class="small fw-semibold" id="saldoModeLabel">Saldo real</span>
+        </button>
+
         <div class="pill">
           <i class="bi bi-calculator"></i>
           <span class="small fw-semibold" id="txSum">R$ 0,00</span>
@@ -195,7 +210,7 @@
       <div class="mt-2 tx-list" id="txList"></div>
     </section>
 
-<section id="view-budgets" class="view d-none">
+    <section id="view-budgets" class="view d-none">
       <div class="mt-3 d-flex justify-content-between align-items-center">
         <div>
           <div class="fw-semibold">Controle de gastos</div>
@@ -227,9 +242,7 @@
 
     <div class="bn-spacer"></div>
 
-    <button class="bn-item" id="bnTheme">
-      <i class="bi bi-circle-half"></i><span>Tema</span>
-    </button>
+    <!-- removido: botão de tema do rodapé (clicava sem querer) -->
     <button class="bn-item" data-bs-toggle="offcanvas" data-bs-target="#filters">
       <i class="bi bi-sliders"></i><span>Filtros</span>
     </button>
@@ -346,34 +359,33 @@
   </div>
 
   <div class="modal fade" id="modalBudget" tabindex="-1">
-<div class="modal-dialog modal-dialog-centered">
-<div class="modal-content rounded-4">
-<div class="modal-header">
-<h5 class="modal-title" id="budgetModalTitle">Nova meta</h5>
-<button class="btn-close" data-bs-dismiss="modal"></button>
-</div>
-<div class="modal-body">
-<input id="budgetId" type="hidden"/>
-<div class="row g-2">
-<div class="col-12">
-<label class="form-label">Categoria</label>
-<select class="form-select" id="budgetCat"></select>
-</div>
-<div class="col-12">
-<label class="form-label">Limite do mês (R$)</label>
-<input class="form-control" id="budgetLimit" inputmode="decimal" placeholder="ex.: 1000,00"/>
-<div class="form-text">Ex.: Alimentação até 1000.</div>
-</div>
-</div>
-</div>
-<div class="modal-footer">
-<button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-<button class="btn btn-primary" id="btnSaveBudget"><i class="bi bi-check2 me-1"></i>Salvar</button>
-</div>
-</div>
-</div>
-</div>
-
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title" id="budgetModalTitle">Nova meta</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input id="budgetId" type="hidden"/>
+          <div class="row g-2">
+            <div class="col-12">
+              <label class="form-label">Categoria</label>
+              <select class="form-select" id="budgetCat"></select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Limite do mês (R$)</label>
+              <input class="form-control" id="budgetLimit" inputmode="decimal" placeholder="ex.: 1000,00"/>
+              <div class="form-text">Ex.: Alimentação até 1000.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary" id="btnSaveBudget"><i class="bi bi-check2 me-1"></i>Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:2000;">
     <div id="appToast" class="toast" role="alert">

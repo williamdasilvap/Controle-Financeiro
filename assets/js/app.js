@@ -3,10 +3,125 @@ import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./
 import { destroyCharts, renderCategoryChart, renderDailyChart, renderMonthlyChart } from "./charts.js";
 const $=(id)=>document.getElementById(id);
 
+// ==============================
+// Preferências (tema / privacidade)
+// ==============================
+const PREF_THEME_KEY = "cf_theme";
+const PREF_HIDE_SALDO_KEY = "cf_hide_saldo";
+const PREF_SALDO_MODE_KEY = "cf_saldo_mode"; // REAL | FILTERED
+
+let hideSaldo = (localStorage.getItem(PREF_HIDE_SALDO_KEY) ?? "1") === "1";
+let saldoMode = (localStorage.getItem(PREF_SALDO_MODE_KEY) ?? "REAL"); // REAL (todas) / FILTERED (respeita tipo/busca)
+
+function maskedBRL(v){
+  return hideSaldo ? "R$ ***" : brl(v);
+}
+function setHideSaldo(next){
+  hideSaldo = !!next;
+  localStorage.setItem(PREF_HIDE_SALDO_KEY, hideSaldo ? "1" : "0");
+  updateSaldoEyeUI();
+  refreshAll();
+}
+function updateSaldoEyeUI(){
+  const btn = $("btnToggleSaldo");
+  if(!btn) return;
+  btn.innerHTML = hideSaldo ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+}
+function setSaldoMode(next){
+  saldoMode = next === "FILTERED" ? "FILTERED" : "REAL";
+  localStorage.setItem(PREF_SALDO_MODE_KEY, saldoMode);
+  const lab = $("saldoModeLabel");
+  if(lab) lab.textContent = saldoMode === "REAL" ? "Saldo real" : "Saldo filtrado";
+  renderTxList();
+}
+
 const DEFAULT_CATS=["Salário","Freela","Venda","Investimentos","Moradia","Contas","Alimentação","Mercado","Transporte","Saúde","Educação","Lazer","Assinaturas","Compras","Outros"];
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).substring(2,10); }
-function emptyState(){ return {categories:[...DEFAULT_CATS],transactions:[],recurring:[]}; }
-let state=loadState()||emptyState();
+
+// normaliza categoria e evita duplicata por maiúsc/minúsc
+function normalizeCategoryName(s){
+  const t = String(s ?? "").trim().replace(/\s+/g," ");
+  return t;
+}
+function getExistingCategoryOrSelf(name){
+  const n = normalizeCategoryName(name);
+  if(!n) return "Outros";
+  const hit = state.categories.find(c => String(c).toLowerCase() === n.toLowerCase());
+  return hit || n;
+}
+
+function emptyState(){ return {categories:[...DEFAULT_CATS],transactions:[],recurring:[],budgets:[]}; }
+
+// valida/normaliza restore
+function normalizeState(obj){
+  const st = emptyState();
+  if(!obj || typeof obj !== "object") return st;
+
+  // categories
+  if(Array.isArray(obj.categories)){
+    for(const c of obj.categories){
+      const cn = normalizeCategoryName(c);
+      if(!cn) continue;
+      if(!st.categories.some(x=>x.toLowerCase()===cn.toLowerCase())) st.categories.push(cn);
+    }
+  }
+
+  // transactions
+  if(Array.isArray(obj.transactions)){
+    for(const t of obj.transactions){
+      const date = String(t?.date ?? "").slice(0,10);
+      const type = (t?.type === "IN" || t?.type === "OUT") ? t.type : null;
+      const desc = String(t?.desc ?? "").trim();
+      const amount = Math.abs(Number(t?.amount ?? 0));
+      if(!date || date.length !== 10) continue;
+      if(!type) continue;
+      if(!desc) continue;
+      if(!Number.isFinite(amount)) continue;
+
+      const cat = getExistingCategoryOrSelf(t?.cat ?? "Outros");
+      const id = String(t?.id ?? uid());
+      const recurringId = t?.recurringId ? String(t.recurringId) : undefined;
+
+      if(cat && !st.categories.some(x=>x.toLowerCase()===cat.toLowerCase())) st.categories.push(cat);
+
+      st.transactions.push({ id, date, type, desc, amount, cat, ...(recurringId?{recurringId}:{}) });
+    }
+  }
+
+  // recurring
+  if(Array.isArray(obj.recurring)){
+    for(const r of obj.recurring){
+      const id = String(r?.id ?? "");
+      const desc = String(r?.desc ?? "").trim();
+      const type = (r?.type === "IN" || r?.type === "OUT") ? r.type : null;
+      const amount = Math.abs(Number(r?.amount ?? 0));
+      const day = Math.min(31, Math.max(1, Number(r?.day ?? 1)));
+      const lastRun = r?.lastRun ? String(r.lastRun).slice(0,7) : "";
+      if(!id || !desc || !type || !Number.isFinite(amount)) continue;
+
+      const cat = getExistingCategoryOrSelf(r?.cat ?? "Outros");
+      if(cat && !st.categories.some(x=>x.toLowerCase()===cat.toLowerCase())) st.categories.push(cat);
+
+      st.recurring.push({ id, desc, type, amount, cat, day, ...(lastRun?{lastRun}:{}) });
+    }
+  }
+
+  // budgets
+  if(Array.isArray(obj.budgets)){
+    for(const b of obj.budgets){
+      const id = String(b?.id ?? uid());
+      const cat = getExistingCategoryOrSelf(b?.cat ?? "Outros");
+      const limit = Math.max(0, Number(b?.limit ?? 0));
+      if(!Number.isFinite(limit)) continue;
+      st.budgets.push({ id, cat, limit });
+      if(cat && !st.categories.some(x=>x.toLowerCase()===cat.toLowerCase())) st.categories.push(cat);
+    }
+  }
+
+  return st;
+}
+
+let state = normalizeState(loadState());
 if(!Array.isArray(state.budgets)) state.budgets=[];
 if(!Array.isArray(state.categories)) state.categories=[...DEFAULT_CATS];
 if(!Array.isArray(state.transactions)) state.transactions=[];
@@ -31,7 +146,9 @@ function rebuildMonthSelect(){
   sel.innerHTML=months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join("");
 }
 function escapeHtml(s){ return (s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
-function ensureCatSelect(){ $("txCat").innerHTML=state.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join(""); }
+function ensureCatSelect(){
+  $("txCat").innerHTML=state.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+}
 function monthFilteredTx(){ const m=$("monthSelect").value; return state.transactions.filter(t=>monthKeyFromYMD(t.date)===m); }
 
 function normDate(d){ return String(d||"").slice(0,10); }
@@ -83,21 +200,21 @@ function dateFromMonthAndDay(yyyyMM, day){
   return `${y}-${String(m).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
 }
 function ensureRecurringTxForMonth(rec, yyyyMM){
-  // evita duplicar: procura qualquer tx com recurringId + mês
   const exists = state.transactions.some(t=>t.recurringId===rec.id && monthKeyFromYMD(t.date)===yyyyMM);
   if(exists) return false;
 
   const date = dateFromMonthAndDay(yyyyMM, rec.day);
+  const cat = getExistingCategoryOrSelf(rec.cat||"Outros");
   const payload={
     id: uid(),
     date,
     type: rec.type,
     desc: rec.desc,
     amount: Math.abs(Number(rec.amount||0)),
-    cat: rec.cat||"Outros",
+    cat,
     recurringId: rec.id
   };
-  if(payload.cat && !state.categories.includes(payload.cat)) state.categories.push(payload.cat);
+  if(payload.cat && !state.categories.some(x=>x.toLowerCase()===payload.cat.toLowerCase())) state.categories.push(payload.cat);
   state.transactions.push(payload);
   return true;
 }
@@ -105,9 +222,7 @@ function applyRecurringUpToCurrentMonth(){
   const current = monthKeyFromDate(new Date());
   let changed=false;
   for(const rec of state.recurring){
-    // gera meses faltantes até o mês atual (inclui o atual)
     const start = rec.lastRun ? addMonths(rec.lastRun, 1) : current;
-    // se nunca rodou, só gera no mês atual
     if(!rec.lastRun){
       changed = ensureRecurringTxForMonth(rec, current) || changed;
       rec.lastRun = current;
@@ -120,12 +235,9 @@ function applyRecurringUpToCurrentMonth(){
       m = addMonths(m, 1);
     }
   }
-  if(changed){
-    saveState(state);
-  }
+  if(changed) saveState(state);
   return changed;
 }
-
 
 function kpis(){
   const monthTx=monthFilteredTx(); let ins=0,outs=0;
@@ -134,13 +246,14 @@ function kpis(){
 }
 function renderKPIs(){
   const {ins,outs,net,saldo}=kpis();
-  $("kSaldo").textContent=brl(saldo); $("kIn").textContent=brl(ins); $("kOut").textContent=brl(outs); $("kNet").textContent=brl(net);
+  $("kSaldo").textContent = maskedBRL(saldo);
+  $("kIn").textContent=brl(ins);
+  $("kOut").textContent=brl(outs);
+  $("kNet").textContent=brl(net);
   setLastUpdate();
 }
 
-
 function baseTxForPeriod(){
-  // Se tiver De/Até, usa o período. Senão, usa o mês selecionado.
   if(filterFrom || filterTo){
     return state.transactions.filter(t=>inRange(t.date, filterFrom, filterTo));
   }
@@ -154,9 +267,28 @@ function filteredList(){
     if(type!=="ALL"&&t.type!==type) return false;
     if(q){ const blob=`${t.desc} ${t.cat}`.toLowerCase(); if(!blob.includes(q)) return false; }
     return true;
-  }).sort((a,b)=>a.date.localeCompare(b.date)); // asc para cálculo de saldo
+  }).sort((a,b)=>a.date.localeCompare(b.date)); // asc
 }
 
+function saldoAnteriorFor(start){
+  if(saldoMode === "REAL"){
+    return state.transactions
+      .filter(t=>t.date < start)
+      .reduce((a,t)=>a+signedAmount(t),0);
+  }
+
+  // FILTERED: respeita tipo/busca
+  const type=$("typeFilter").value;
+  const q=($("qSearch").value||"").trim().toLowerCase();
+  return state.transactions
+    .filter(t=>t.date < start)
+    .filter(t=>{
+      if(type!=="ALL"&&t.type!==type) return false;
+      if(q){ const blob=`${t.desc} ${t.cat}`.toLowerCase(); if(!blob.includes(q)) return false; }
+      return true;
+    })
+    .reduce((a,t)=>a+signedAmount(t),0);
+}
 
 function renderTxList(){
   const listAsc=filteredList(); // asc
@@ -167,19 +299,17 @@ function renderTxList(){
   $("txSum").textContent=brl(sum);
   $("txRangeLabel").textContent=activePeriodLabel();
 
-  // saldo anterior ao período (sempre calculado com TODOS os lançamentos, sem filtro de tipo/busca)
   const start=periodStartDate();
-  const saldoAnterior = state.transactions
-    .filter(t=>t.date < start)
-    .reduce((a,t)=>a+signedAmount(t),0);
+  const saldoAnterior = saldoAnteriorFor(start);
 
-  // calcula saldo acumulado por dia dentro do período (usando listAsc filtrada)
-  const dayTotals=new Map(); // date -> signed sum
+  // totais por dia (asc)
+  const dayTotals=new Map();
   for(const t of listAsc){
     dayTotals.set(t.date,(dayTotals.get(t.date)||0)+signedAmount(t));
   }
   const daysAsc=Array.from(new Set(listAsc.map(t=>t.date))).sort();
-  const saldoAposDia=new Map(); // date -> saldo ao final do dia
+
+  const saldoAposDia=new Map();
   let running=saldoAnterior;
   for(const d of daysAsc){
     running += (dayTotals.get(d)||0);
@@ -197,18 +327,22 @@ function renderTxList(){
         <div class="fw-semibold">Saldo anterior</div>
         <div class="small text-secondary">antes de ${humanDate(start)}</div>
       </div>
-      <div class="text-end fw-semibold">${brl(saldoAnterior)}</div>
+      <div class="text-end fw-semibold">${maskedBRL(saldoAnterior)}</div>
     </div>`;
   wrap.appendChild(head);
 
-  // agrupa por dia (desc)
+  // agrupa por dia
   const byDay=new Map();
   for(const t of listDesc){
     if(!byDay.has(t.date)) byDay.set(t.date,[]);
     byDay.get(t.date).push(t);
   }
 
-  for(const [day,items] of byDay.entries()){
+  // ✅ bug fix: garante ordem DESC de dias
+  const daysDesc = Array.from(byDay.keys()).sort((a,b)=>b.localeCompare(a));
+
+  for(const day of daysDesc){
+    const items = byDay.get(day) || [];
     const daySum = items.reduce((a,t)=>a+signedAmount(t),0);
     const saldoDia = saldoAposDia.get(day) ?? saldoAnterior;
 
@@ -222,7 +356,7 @@ function renderTxList(){
         </div>
         <div class="text-end">
           <div class="small text-secondary">Saldo</div>
-          <div class="fw-semibold">${brl(saldoDia)}</div>
+          <div class="fw-semibold">${maskedBRL(saldoDia)}</div>
         </div>
       </div>
       <div class="tx-day-body"></div>
@@ -274,7 +408,6 @@ function renderTxList(){
   });
 }
 
-
 function renderCategory(){
   const monthTx=monthFilteredTx().filter(t=>t.type==="OUT");
   const map=new Map();
@@ -306,10 +439,8 @@ function renderDaily(){
   renderDailyChart($("chartDaily"), labels, inVals, outVals, balanceVals);
 }
 
-
 function renderMonthly(){
-  // últimos 6 meses (incluindo o atual)
-  const months=getMonths().slice(0,6).reverse(); // asc para ficar bonito
+  const months=getMonths().slice(0,6).reverse();
   const inMap=new Map(); const outMap=new Map();
   for(const m of months){ inMap.set(m,0); outMap.set(m,0); }
   for(const t of state.transactions){
@@ -324,7 +455,6 @@ function renderMonthly(){
   const canvas=$("chartMonths");
   if(canvas) renderMonthlyChart(canvas, labels, inVals, outVals);
 }
-
 
 function ensureBudgetCatSelect(){
   const sel=$("budgetCat"); if(!sel) return;
@@ -387,7 +517,6 @@ function renderBudgets(){
     btn.addEventListener("click", ()=>openBudgetModal(btn.getAttribute("data-bedit")));
   });
 }
-
 
 function renderBudgetAlerts(){
   const box=$("budgetAlerts");
@@ -471,11 +600,12 @@ function openBudgetModal(id){
 }
 function saveBudgetFromModal(){
   const id=$("budgetId").value||uid();
-  const cat=$("budgetCat").value||"Outros";
+  const cat=getExistingCategoryOrSelf($("budgetCat").value||"Outros");
   const limit=parseMoney($("budgetLimit").value);
   const existing=state.budgets.find(x=>x.id===id);
   if(existing){ existing.cat=cat; existing.limit=limit; }
   else state.budgets.push({id,cat,limit});
+  if(cat && !state.categories.some(x=>x.toLowerCase()===cat.toLowerCase())) state.categories.push(cat);
   saveState(state); refreshAll(); toast("Meta salva.");
   bootstrap.Modal.getInstance($("modalBudget"))?.hide();
 }
@@ -489,7 +619,6 @@ function openModalNew(){
   $("txDesc").value=""; $("txAmount").value=""; $("txCatNew").value="";
   $("txCat").value=state.categories.includes("Outros")?"Outros":state.categories[0];
 
-  // recorrência (se existir no HTML)
   if($("txRecurring")){
     $("txRecurring").checked=false;
     $("txRecurringDay").value=String(new Date().getDate());
@@ -504,7 +633,6 @@ function openEditModal(id){
   $("txDesc").value=t.desc; $("txAmount").value=String(Math.abs(Number(t.amount||0))).replace(".",",");
   $("txCatNew").value=""; $("txCat").value=t.cat||"Outros";
 
-  // recorrência (se existir no HTML)
   if($("txRecurring")){
     const isRec=!!t.recurringId;
     $("txRecurring").checked=isRec;
@@ -518,15 +646,22 @@ function saveTxFromModal(){
   const id=$("txId").value||uid();
   const date=$("txDate").value; const type=$("txType").value;
   const desc=$("txDesc").value.trim(); const amount=parseMoney($("txAmount").value);
-  let cat=$("txCat").value; const catNew=$("txCatNew").value.trim();
-  if(catNew){ cat=catNew; if(!state.categories.includes(catNew)) state.categories.push(catNew); }
+
+  let cat=$("txCat").value;
+  const catNew=normalizeCategoryName($("txCatNew").value);
+  if(catNew){
+    cat = getExistingCategoryOrSelf(catNew);
+    if(!state.categories.some(x=>x.toLowerCase()===cat.toLowerCase())) state.categories.push(cat);
+  }else{
+    cat = getExistingCategoryOrSelf(cat);
+  }
+
   if(!date||!desc||!amount){ toast("Preencha data, descrição e valor."); return; }
 
   const idx=state.transactions.findIndex(x=>x.id===id);
   const previous = idx>=0 ? state.transactions[idx] : null;
   const prevRecurringId = previous?.recurringId || "";
 
-  // recorrência (se existir no HTML)
   const wantsRecurring = !!$("txRecurring") && $("txRecurring").checked;
   const day = $("txRecurringDay") ? Number($("txRecurringDay").value||String(date).slice(8,10)) : Number(String(date).slice(8,10));
 
@@ -546,13 +681,11 @@ function saveTxFromModal(){
       existingRec.cat = recPayload.cat;
       existingRec.type = recPayload.type;
       existingRec.day = recPayload.day;
-      // garante que lastRun não volte pra trás
       if(!existingRec.lastRun || existingRec.lastRun < monthOfThisTx) existingRec.lastRun = monthOfThisTx;
     }else{
       state.recurring.push(recPayload);
     }
   }else{
-    // se era recorrente e o usuário desmarcou, remove a regra (para não gerar nos próximos meses)
     if(prevRecurringId){
       state.recurring = state.recurring.filter(r=>r.id!==prevRecurringId);
     }
@@ -598,21 +731,34 @@ function backupJson(){
   toast("Backup gerado.");
 }
 async function restoreJson(file){
-  const txt=await file.text(); const obj=JSON.parse(txt);
-  if(!obj||!Array.isArray(obj.transactions)) throw new Error("Arquivo inválido");
-  state=obj; persistAndRefresh("Backup restaurado.");
+  const txt=await file.text();
+  const obj=JSON.parse(txt);
+  const next = normalizeState(obj);
+  state = next;
+  persistAndRefresh("Backup restaurado.");
 }
 
 function setupTheme(){
-  const toggle=()=>{
-    const html=document.documentElement;
-    const next=html.getAttribute("data-bs-theme")==="dark"?"light":"dark";
-    html.setAttribute("data-bs-theme",next);
-    $("btnTheme").innerHTML=next==="dark"?'<i class="bi bi-sun"></i>':'<i class="bi bi-moon-stars"></i>';
+  const html=document.documentElement;
+
+  const applyTheme=(theme)=>{
+    const t = (theme==="dark") ? "dark" : "light";
+    html.setAttribute("data-bs-theme",t);
+    localStorage.setItem(PREF_THEME_KEY, t);
+    $("btnTheme").innerHTML = t==="dark" ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon-stars"></i>';
   };
-  $("btnTheme").addEventListener("click",toggle);
-  $("bnTheme").addEventListener("click",toggle);
+
+  // aplica tema salvo
+  applyTheme(localStorage.getItem(PREF_THEME_KEY) || html.getAttribute("data-bs-theme") || "light");
+
+  const toggle=()=>{
+    const next = html.getAttribute("data-bs-theme")==="dark" ? "light" : "dark";
+    applyTheme(next);
+  };
+
+  $("btnTheme")?.addEventListener("click",toggle);
 }
+
 function showView(name){
   $("view-home").classList.toggle("d-none",name!=="home");
   $("view-tx").classList.toggle("d-none",name!=="tx");
@@ -625,13 +771,11 @@ function setupNav(){
     btn.addEventListener("click",()=>showView(btn.getAttribute("data-nav")));
   });
   $("btnAddBudget")?.addEventListener("click", ()=>openBudgetModal());
-  $("btnBudgetNew")?.addEventListener("click", ()=>openBudgetModal());
   $("btnGoBudgets")?.addEventListener("click", ()=>showView("budgets"));
   $("btnSaveBudget")?.addEventListener("click", saveBudgetFromModal);
-
 }
-function setupFilters(){
 
+function setupFilters(){
   $("qSearch2").value=$("qSearch").value;
   $("typeFilter2").value=$("typeFilter").value;
   if($("dateFrom2")) $("dateFrom2").value=filterFrom;
@@ -661,7 +805,6 @@ function setupFilters(){
   $("qSearch").addEventListener("input",()=>{ $("qSearch2").value=$("qSearch").value; renderTxList(); });
   $("typeFilter").addEventListener("change",()=>{ $("typeFilter2").value=$("typeFilter").value; renderTxList(); });
 
-  // atalhos de período
   const setRange=(from,to)=>{
     filterFrom=from||""; filterTo=to||"";
     if($("dateFrom2")) $("dateFrom2").value=filterFrom;
@@ -680,28 +823,26 @@ function setupFilters(){
     setRange(ymd(from), ymd(now));
   });
   $("btnRangeMonth")?.addEventListener("click",()=>{
-    setRange("",""); // volta pro filtro de mês
+    setRange("","");
   });
   $("btnRangeAll")?.addEventListener("click",()=>{
-    // período inteiro (pega do mínimo ao máximo)
     const dates=state.transactions.map(t=>t.date).sort();
     if(!dates.length) return setRange("","");
     setRange(dates[0], dates[dates.length-1]);
   });
-
 }
+
 function setup(){
-  // Gera lançamentos recorrentes pendentes (antes de renderizar)
   applyRecurringUpToCurrentMonth();
 
   rebuildMonthSelect(); ensureCatSelect();
+
   $("monthSelect").value=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
   $("monthSelect").addEventListener("change",refreshAll);
 
   $("btnAddTx").addEventListener("click",openModalNew);
   $("btnSaveTx").addEventListener("click",saveTxFromModal);
 
-  // UI: mostrar/ocultar opções de recorrência
   if($("txRecurring")){
     $("txRecurring").addEventListener("change",()=>{
       const on = $("txRecurring").checked;
@@ -732,6 +873,21 @@ function setup(){
     refreshAll();
   });
 
+  // botão olho: esconder/mostrar saldo
+  $("btnToggleSaldo")?.addEventListener("click", ()=>setHideSaldo(!hideSaldo));
+  updateSaldoEyeUI();
+
+  // toggle saldo real/filtrado no extrato
+  $("btnSaldoMode")?.addEventListener("click", ()=>{
+    setSaldoMode(saldoMode === "REAL" ? "FILTERED" : "REAL");
+  });
+  setSaldoMode(saldoMode);
+
   saveState(state); refreshAll();
 }
-setupTheme(); setupNav(); setupFilters(); setup(); showView("home");
+
+setupTheme();
+setupNav();
+setupFilters();
+setup();
+showView("home");
