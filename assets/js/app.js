@@ -3,14 +3,15 @@ import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./
 import { destroyCharts, renderCategoryChart, renderDailyChart, renderMonthlyChart } from "./charts.js";
 const $=(id)=>document.getElementById(id);
 
+const APP_VERSION="1.2.0";
+
 const DEFAULT_CATS=["Salário","Freela","Venda","Investimentos","Moradia","Contas","Alimentação","Mercado","Transporte","Saúde","Educação","Lazer","Assinaturas","Compras","Outros"];
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).substring(2,10); }
-function emptyState(){ return {categories:[...DEFAULT_CATS],transactions:[],recurring:[]}; }
+function emptyState(){ return {categories:[...DEFAULT_CATS],transactions:[]}; }
 let state=loadState()||emptyState();
 if(!Array.isArray(state.budgets)) state.budgets=[];
 if(!Array.isArray(state.categories)) state.categories=[...DEFAULT_CATS];
 if(!Array.isArray(state.transactions)) state.transactions=[];
-if(!Array.isArray(state.recurring)) state.recurring=[];
 
 // filtros de período (YYYY-MM-DD)
 let filterFrom="";
@@ -18,6 +19,22 @@ let filterTo="";
 
 function toast(msg){ $("toastBody").textContent=msg; $("toastTime").textContent="agora"; new bootstrap.Toast($("appToast")).show(); }
 function setLastUpdate(){ $("lastUpdate").textContent=new Date().toLocaleString("pt-BR"); }
+
+function registerServiceWorker(){
+  if(!("serviceWorker" in navigator)) return;
+  // iOS PWA pode demorar a atualizar cache; SW ajuda bastante.
+  navigator.serviceWorker.register("./sw.js").catch(()=>{});
+}
+
+function checkAppVersion(){
+  const key="controle_financeiro_app_version";
+  const prev=localStorage.getItem(key);
+  if(prev!==APP_VERSION){
+    localStorage.setItem(key, APP_VERSION);
+    if(prev) toast(`Atualização aplicada (v${APP_VERSION}).`);
+  }
+}
+
 function signedAmount(t){ const v=Number(t.amount||0); return t.type==="OUT"?-Math.abs(v):Math.abs(v); }
 function totalBalance(){ return state.transactions.reduce((a,t)=>a+signedAmount(t),0); }
 
@@ -56,76 +73,6 @@ function periodStartDate(){
   return `${m}-01`;
 }
 
-// ==============================
-// Lançamentos recorrentes (mensais)
-// ==============================
-function monthKeyFromDate(dt){
-  const y=dt.getFullYear();
-  const m=String(dt.getMonth()+1).padStart(2,"0");
-  return `${y}-${m}`;
-}
-function parseMonthKey(yyyyMM){
-  const [y,m]=String(yyyyMM||"").split("-");
-  return {y:Number(y), m:Number(m)};
-}
-function addMonths(yyyyMM, delta){
-  const {y,m}=parseMonthKey(yyyyMM);
-  const d=new Date(y, (m-1)+delta, 1);
-  return monthKeyFromDate(d);
-}
-function lastDayOfMonth(yyyy, mm){
-  return new Date(yyyy, mm, 0).getDate(); // mm = 1..12
-}
-function dateFromMonthAndDay(yyyyMM, day){
-  const {y,m}=parseMonthKey(yyyyMM);
-  const max=lastDayOfMonth(y,m);
-  const dd=Math.min(Math.max(1, Number(day||1)), max);
-  return `${y}-${String(m).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
-}
-function ensureRecurringTxForMonth(rec, yyyyMM){
-  // evita duplicar: procura qualquer tx com recurringId + mês
-  const exists = state.transactions.some(t=>t.recurringId===rec.id && monthKeyFromYMD(t.date)===yyyyMM);
-  if(exists) return false;
-
-  const date = dateFromMonthAndDay(yyyyMM, rec.day);
-  const payload={
-    id: uid(),
-    date,
-    type: rec.type,
-    desc: rec.desc,
-    amount: Math.abs(Number(rec.amount||0)),
-    cat: rec.cat||"Outros",
-    recurringId: rec.id
-  };
-  if(payload.cat && !state.categories.includes(payload.cat)) state.categories.push(payload.cat);
-  state.transactions.push(payload);
-  return true;
-}
-function applyRecurringUpToCurrentMonth(){
-  const current = monthKeyFromDate(new Date());
-  let changed=false;
-  for(const rec of state.recurring){
-    // gera meses faltantes até o mês atual (inclui o atual)
-    const start = rec.lastRun ? addMonths(rec.lastRun, 1) : current;
-    // se nunca rodou, só gera no mês atual
-    if(!rec.lastRun){
-      changed = ensureRecurringTxForMonth(rec, current) || changed;
-      rec.lastRun = current;
-      continue;
-    }
-    let m = start;
-    while(m <= current){
-      changed = ensureRecurringTxForMonth(rec, m) || changed;
-      rec.lastRun = m;
-      m = addMonths(m, 1);
-    }
-  }
-  if(changed){
-    saveState(state);
-  }
-  return changed;
-}
-
 
 function kpis(){
   const monthTx=monthFilteredTx(); let ins=0,outs=0;
@@ -136,6 +83,63 @@ function renderKPIs(){
   const {ins,outs,net,saldo}=kpis();
   $("kSaldo").textContent=brl(saldo); $("kIn").textContent=brl(ins); $("kOut").textContent=brl(outs); $("kNet").textContent=brl(net);
   setLastUpdate();
+}
+
+function renderHomeBudgetAlerts(){
+  const wrap=$("budgetAlertsHome"); if(!wrap) return;
+  const spentMap=monthSpentByCategory();
+  if(!Array.isArray(state.budgets) || !state.budgets.length){
+    wrap.innerHTML = `<div class="small text-secondary">Nenhuma meta cadastrada. Vá em <b>Metas</b> para criar.</div>`;
+    return;
+  }
+  const rows = state.budgets.map(b=>{
+    const spent = spentMap.get(b.cat)||0;
+    const limit = Math.max(0, Number(b.limit||0));
+    const pct = limit>0 ? (spent/limit)*100 : 0;
+    const status = pct>=100 ? "Estourou" : (pct>=80 ? "Atenção" : "Ok");
+    return {cat:b.cat, spent, limit, pct, status};
+  });
+
+  const alerts = rows.filter(r=>r.pct>=80).sort((a,b)=>b.pct-a.pct);
+  if(!alerts.length){
+    wrap.innerHTML = `<div class="small text-secondary">Tudo ok nas metas do mês ✅</div>`;
+    return;
+  }
+  wrap.innerHTML = alerts.map(r=>`
+    <div class="tx-item">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div>
+          <div class="fw-semibold">${escapeHtml(r.cat)}</div>
+          <div class="small text-secondary">${brl(r.spent)} de ${brl(r.limit)} • <span class="badge-soft">${r.status}</span></div>
+        </div>
+        <div class="fw-semibold ${r.pct>=100?"text-danger":"text-warning"}">${Math.round(r.pct)}%</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderHomeTopOut(){
+  const wrap=$("topOutHome"); if(!wrap) return;
+  const outs = monthFilteredTx().filter(t=>t.type==="OUT")
+    .slice()
+    .sort((a,b)=>Math.abs(Number(b.amount||0))-Math.abs(Number(a.amount||0)))
+    .slice(0,5);
+
+  if(!outs.length){
+    wrap.innerHTML = `<div class="small text-secondary">Sem gastos no mês.</div>`;
+    return;
+  }
+  wrap.innerHTML = outs.map(t=>`
+    <div class="tx-item">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div>
+          <div class="fw-semibold">${escapeHtml(t.desc)}</div>
+          <div class="small text-secondary"><span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
+        </div>
+        <div class="fw-semibold text-danger">${brl(Math.abs(Number(t.amount||0)))}</div>
+      </div>
+    </div>
+  `).join("");
 }
 
 
@@ -387,72 +391,6 @@ function renderBudgets(){
     btn.addEventListener("click", ()=>openBudgetModal(btn.getAttribute("data-bedit")));
   });
 }
-
-
-function renderBudgetAlerts(){
-  const box=$("budgetAlerts");
-  const list=$("budgetAlertList");
-  if(!box || !list) return;
-
-  const spentMap=monthSpentByCategory();
-  if(!state.budgets.length){
-    box.textContent="Nenhuma meta cadastrada ainda.";
-    list.innerHTML="";
-    return;
-  }
-
-  const alerts=[];
-  for(const b of state.budgets){
-    const spent=spentMap.get(b.cat)||0;
-    const limit=Math.max(0, Number(b.limit||0));
-    const pct = limit>0 ? (spent/limit)*100 : 0;
-    if(pct>=100) alerts.push({level:"danger",txt:`${b.cat}: estourou (${Math.round(pct)}%)`,spent,limit});
-    else if(pct>=80) alerts.push({level:"warning",txt:`${b.cat}: atenção (${Math.round(pct)}%)`,spent,limit});
-  }
-
-  if(!alerts.length){
-    box.textContent="Tudo ok: nenhuma meta passou de 80% no mês selecionado.";
-    list.innerHTML="";
-    return;
-  }
-
-  box.textContent=`Você tem ${alerts.length} alerta(s) de meta no mês selecionado.`;
-  list.innerHTML = alerts.map(a=>`
-    <div class="tx-item">
-      <div class="d-flex justify-content-between align-items-center gap-2">
-        <div class="fw-semibold">${escapeHtml(a.txt)}</div>
-        <span class="badge bg-${a.level}">${brl(a.spent)} / ${brl(a.limit)}</span>
-      </div>
-    </div>
-  `).join("");
-}
-
-function renderTopExpenses(){
-  const wrap=$("topOutList");
-  if(!wrap) return;
-  const monthTx=monthFilteredTx().filter(t=>t.type==="OUT")
-    .slice()
-    .sort((a,b)=>Number(b.amount||0)-Number(a.amount||0))
-    .slice(0,5);
-
-  if(!monthTx.length){
-    wrap.innerHTML = `<div class="small text-secondary">Sem gastos no mês.</div>`;
-    return;
-  }
-
-  wrap.innerHTML = monthTx.map((t,i)=>`
-    <div class="tx-item">
-      <div class="d-flex justify-content-between gap-2">
-        <div>
-          <div class="fw-semibold">${i+1}. ${escapeHtml(t.desc)}</div>
-          <div class="small text-secondary">${humanDate(t.date)} • <span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
-        </div>
-        <div class="fw-semibold text-danger">${brl(Math.abs(Number(t.amount||0)))}</div>
-      </div>
-    </div>
-  `).join("");
-}
-
 function openBudgetModal(id){
   ensureBudgetCatSelect();
   const modalEl=$("modalBudget");
@@ -480,7 +418,7 @@ function saveBudgetFromModal(){
   bootstrap.Modal.getInstance($("modalBudget"))?.hide();
 }
 
-function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderDaily(); renderMonthly(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
+function refreshAll(){renderKPIs(); renderHomeBudgetAlerts(); renderHomeTopOut(); renderTxList(); destroyCharts(); renderCategory(); renderDaily(); renderMonthly(); renderBudgets(); }
 function persistAndRefresh(msg){ saveState(state); rebuildMonthSelect(); ensureCatSelect(); refreshAll(); if(msg) toast(msg); }
 
 function openModalNew(){
@@ -488,13 +426,6 @@ function openModalNew(){
   $("txId").value=""; $("txDate").value=ymd(new Date()); $("txType").value="OUT";
   $("txDesc").value=""; $("txAmount").value=""; $("txCatNew").value="";
   $("txCat").value=state.categories.includes("Outros")?"Outros":state.categories[0];
-
-  // recorrência (se existir no HTML)
-  if($("txRecurring")){
-    $("txRecurring").checked=false;
-    $("txRecurringDay").value=String(new Date().getDate());
-    $("txRecurringOpts")?.classList.add("d-none");
-  }
   new bootstrap.Modal($("modalTx")).show();
 }
 function openEditModal(id){
@@ -503,15 +434,6 @@ function openEditModal(id){
   $("txId").value=t.id; $("txDate").value=t.date; $("txType").value=t.type;
   $("txDesc").value=t.desc; $("txAmount").value=String(Math.abs(Number(t.amount||0))).replace(".",",");
   $("txCatNew").value=""; $("txCat").value=t.cat||"Outros";
-
-  // recorrência (se existir no HTML)
-  if($("txRecurring")){
-    const isRec=!!t.recurringId;
-    $("txRecurring").checked=isRec;
-    const dd=Number(String(t.date||"").slice(8,10))||new Date().getDate();
-    $("txRecurringDay").value=String(dd);
-    $("txRecurringOpts")?.classList.toggle("d-none", !isRec);
-  }
   new bootstrap.Modal($("modalTx")).show();
 }
 function saveTxFromModal(){
@@ -521,43 +443,8 @@ function saveTxFromModal(){
   let cat=$("txCat").value; const catNew=$("txCatNew").value.trim();
   if(catNew){ cat=catNew; if(!state.categories.includes(catNew)) state.categories.push(catNew); }
   if(!date||!desc||!amount){ toast("Preencha data, descrição e valor."); return; }
-
-  const idx=state.transactions.findIndex(x=>x.id===id);
-  const previous = idx>=0 ? state.transactions[idx] : null;
-  const prevRecurringId = previous?.recurringId || "";
-
-  // recorrência (se existir no HTML)
-  const wantsRecurring = !!$("txRecurring") && $("txRecurring").checked;
-  const day = $("txRecurringDay") ? Number($("txRecurringDay").value||String(date).slice(8,10)) : Number(String(date).slice(8,10));
-
   const payload={id,date,type,desc,amount:Math.abs(amount),cat};
-
-  if(wantsRecurring){
-    const recId = prevRecurringId || uid();
-    payload.recurringId = recId;
-
-    const monthOfThisTx = monthKeyFromYMD(date);
-    const existingRec = state.recurring.find(r=>r.id===recId);
-    const recPayload = { id: recId, desc, amount: Math.abs(amount), cat, type, day, lastRun: monthOfThisTx };
-
-    if(existingRec){
-      existingRec.desc = recPayload.desc;
-      existingRec.amount = recPayload.amount;
-      existingRec.cat = recPayload.cat;
-      existingRec.type = recPayload.type;
-      existingRec.day = recPayload.day;
-      // garante que lastRun não volte pra trás
-      if(!existingRec.lastRun || existingRec.lastRun < monthOfThisTx) existingRec.lastRun = monthOfThisTx;
-    }else{
-      state.recurring.push(recPayload);
-    }
-  }else{
-    // se era recorrente e o usuário desmarcou, remove a regra (para não gerar nos próximos meses)
-    if(prevRecurringId){
-      state.recurring = state.recurring.filter(r=>r.id!==prevRecurringId);
-    }
-  }
-
+  const idx=state.transactions.findIndex(x=>x.id===id);
   if(idx>=0) state.transactions[idx]=payload; else state.transactions.push(payload);
   saveState(state);
   bootstrap.Modal.getInstance($("modalTx")).hide();
@@ -626,7 +513,6 @@ function setupNav(){
   });
   $("btnAddBudget")?.addEventListener("click", ()=>openBudgetModal());
   $("btnBudgetNew")?.addEventListener("click", ()=>openBudgetModal());
-  $("btnGoBudgets")?.addEventListener("click", ()=>showView("budgets"));
   $("btnSaveBudget")?.addEventListener("click", saveBudgetFromModal);
 
 }
@@ -691,26 +577,12 @@ function setupFilters(){
 
 }
 function setup(){
-  // Gera lançamentos recorrentes pendentes (antes de renderizar)
-  applyRecurringUpToCurrentMonth();
-
   rebuildMonthSelect(); ensureCatSelect();
   $("monthSelect").value=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
   $("monthSelect").addEventListener("change",refreshAll);
 
   $("btnAddTx").addEventListener("click",openModalNew);
   $("btnSaveTx").addEventListener("click",saveTxFromModal);
-
-  // UI: mostrar/ocultar opções de recorrência
-  if($("txRecurring")){
-    $("txRecurring").addEventListener("change",()=>{
-      const on = $("txRecurring").checked;
-      $("txRecurringOpts")?.classList.toggle("d-none", !on);
-      if(on && $("txRecurringDay") && !$("txRecurringDay").value){
-        $("txRecurringDay").value = String(new Date().getDate());
-      }
-    });
-  }
 
   $("btnDemo").addEventListener("click",genDemo);
   $("btnExport").addEventListener("click",exportCsv);
@@ -733,5 +605,7 @@ function setup(){
   });
 
   saveState(state); refreshAll();
+  checkAppVersion();
 }
+registerServiceWorker();
 setupTheme(); setupNav(); setupFilters(); setup(); showView("home");

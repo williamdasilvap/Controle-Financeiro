@@ -4,12 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Finanças • Ganhos & Gastos</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0d6efd">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Finanças">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="assets/icons/apple-touch-icon-167.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="assets/icons/apple-touch-icon-152.png">
+
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
-  <link rel="stylesheet" href="assets/css/app.css">
+  <link rel="stylesheet" href="assets/css/app.css?v=1.2.0">
 </head>
 
 <body>
@@ -101,29 +110,27 @@
       </div>
 
 
-      <div class="card glass mt-3">
-        <div class="card-header bg-transparent border-0 pb-0 d-flex justify-content-between align-items-center">
-          <div>
-            <div class="fw-semibold">Alertas & metas</div>
-            <div class="small text-secondary">avisos do mês selecionado</div>
-          </div>
-          <button class="btn btn-sm btn-outline-secondary" id="btnGoBudgets"><i class="bi bi-bullseye me-1"></i>metas</button>
-        </div>
-        <div class="card-body pt-2">
-          <div id="budgetAlerts" class="small text-secondary">—</div>
-          <div class="mt-2" id="budgetAlertList"></div>
-        </div>
-      </div>
+<div class="card glass mt-3" id="cardBudgetAlerts">
+  <div class="card-header bg-transparent border-0 pb-0">
+    <div class="fw-semibold">Alertas de metas</div>
+    <div class="small text-secondary">mês selecionado</div>
+  </div>
+  <div class="card-body pt-2">
+    <div id="budgetAlertsHome"></div>
+  </div>
+</div>
 
-      <div class="card glass mt-3">
-        <div class="card-header bg-transparent border-0 pb-0">
-          <div class="fw-semibold">Top gastos do mês</div>
-          <div class="small text-secondary">maiores saídas (mês selecionado)</div>
-        </div>
-        <div class="card-body pt-2">
-          <div id="topOutList"></div>
-        </div>
-      </div>
+<div class="card glass mt-3" id="cardTopOut">
+  <div class="card-header bg-transparent border-0 pb-0">
+    <div class="fw-semibold">Top gastos</div>
+    <div class="small text-secondary">mês selecionado</div>
+  </div>
+  <div class="card-body pt-2">
+    <div id="topOutHome"></div>
+  </div>
+</div>
+
+
 
       <div class="card glass mt-3">
         <div class="card-header bg-transparent border-0 pb-0">
@@ -316,18 +323,6 @@
               <select class="form-select" id="txCat"></select>
               <input class="form-control mt-2" id="txCatNew" placeholder="nova categoria (opcional)">
             </div>
-
-            <div class="col-12">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="txRecurring">
-                <label class="form-check-label" for="txRecurring">Repetir todo mês</label>
-              </div>
-            </div>
-            <div class="col-12 d-none" id="txRecurringOpts">
-              <label class="form-label">Dia do mês</label>
-              <input class="form-control" id="txRecurringDay" type="number" min="1" max="31" inputmode="numeric" placeholder="ex.: 5">
-              <div class="form-text">O app cria este lançamento automaticamente todo mês.</div>
-            </div>
             <div class="col-12">
               <div class="alert alert-info mb-0">
                 <i class="bi bi-info-circle me-1"></i>
@@ -345,34 +340,36 @@
     </div>
   </div>
 
-  <div class="modal fade" id="modalBudget" tabindex="-1">
-<div class="modal-dialog modal-dialog-centered">
-<div class="modal-content rounded-4">
-<div class="modal-header">
-<h5 class="modal-title" id="budgetModalTitle">Nova meta</h5>
-<button class="btn-close" data-bs-dismiss="modal"></button>
+
+<div class="modal fade" id="modalBudget" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4">
+      <div class="modal-header">
+        <h5 class="modal-title" id="budgetModalTitle">Nova meta</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input id="budgetId" type="hidden"/>
+        <div class="row g-2">
+          <div class="col-12">
+            <label class="form-label">Categoria</label>
+            <select class="form-select" id="budgetCat"></select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Limite do mês (R$)</label>
+            <input class="form-control" id="budgetLimit" inputmode="decimal" placeholder="ex.: 1000,00"/>
+            <div class="form-text">Ex.: Alimentação até 1000.</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" id="btnSaveBudget"><i class="bi bi-check2 me-1"></i>Salvar</button>
+      </div>
+    </div>
+  </div>
 </div>
-<div class="modal-body">
-<input id="budgetId" type="hidden"/>
-<div class="row g-2">
-<div class="col-12">
-<label class="form-label">Categoria</label>
-<select class="form-select" id="budgetCat"></select>
-</div>
-<div class="col-12">
-<label class="form-label">Limite do mês (R$)</label>
-<input class="form-control" id="budgetLimit" inputmode="decimal" placeholder="ex.: 1000,00"/>
-<div class="form-text">Ex.: Alimentação até 1000.</div>
-</div>
-</div>
-</div>
-<div class="modal-footer">
-<button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-<button class="btn btn-primary" id="btnSaveBudget"><i class="bi bi-check2 me-1"></i>Salvar</button>
-</div>
-</div>
-</div>
-</div>
+
 
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:2000;">
@@ -388,6 +385,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script type="module" src="assets/js/app.js"></script>
+  <script type="module" src="assets/js/app.js?v=1.2.1"></script>
 </body>
 </html>
