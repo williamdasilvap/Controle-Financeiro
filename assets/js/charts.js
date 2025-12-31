@@ -4,12 +4,8 @@ let chartCat=null;
 let chartDaily=null;
 let chartMonths=null;
 
-// modo privacidade: quando true, valores monetários são mascarados
-let privacy=false;
-
-export function setChartsPrivacy(v){
-  privacy = !!v;
-}
+let hideValues=false;
+export function setChartsPrivacy(v){ hideValues=!!v; }
 
 const PALETTE=[
   "rgba(13,110,253,.70)","rgba(25,135,84,.70)","rgba(220,53,69,.70)","rgba(255,193,7,.70)",
@@ -17,15 +13,7 @@ const PALETTE=[
   "rgba(214,51,132,.70)","rgba(108,117,125,.70)"
 ];
 
-function moneyTick(v){
-  if(privacy) return "•••";
-  return brl(v).replace(",00","");
-}
-
-function moneyLabel(v){
-  if(privacy) return "R$ ***,**";
-  return brl(v);
-}
+function moneyTick(v){ return hideValues ? "***" : brl(v).replace(",00",""); }
 
 export function destroyCharts(){
   if(chartCat) chartCat.destroy();
@@ -38,33 +26,24 @@ export function renderCategoryChart(canvas,labels,values){
   if(chartCat) chartCat.destroy();
   const colors = labels.map((_,i)=>PALETTE[i%PALETTE.length]);
 
-  // Barras horizontais (top categorias)
   chartCat=new Chart(canvas,{
-    type:"bar",
-    data:{
-      labels,
-      datasets:[{
-        label:"Gasto",
-        data:values,
-        backgroundColor:colors,
-        borderWidth:0,
-        borderRadius:10,
-      }]
-    },
+    type:"doughnut",
+    data:{labels,datasets:[{data:values,backgroundColor:colors,borderWidth:0}]},
     options:{
       responsive:true,
-      indexAxis:"y",
+      cutout:"55%",
       plugins:{
-        legend:{display:false},
+        legend:{position:"bottom"},
         tooltip:{
           callbacks:{
-            label:(ctx)=>`${ctx.label}: ${moneyLabel(ctx.raw)}`
+            label:(ctx)=>{
+              const total = (ctx.dataset.data||[]).reduce((a,b)=>a+Number(b||0),0) || 0;
+              const val = Number(ctx.raw||0);
+              const pct = total>0 ? ((val/total)*100).toFixed(1) : "0.0";
+              return `${ctx.label}: ${hideValues?"R$ ***,**":brl(val)} (${pct}%)`;
+            }
           }
         }
-      },
-      scales:{
-        x:{ticks:{callback:(v)=>moneyTick(v)}},
-        y:{ticks:{autoSkip:false}}
       }
     }
   });
@@ -118,7 +97,7 @@ export function renderDailyChart(canvas,labels,inVals,outVals,balanceVals){
       interaction:{mode:"index",intersect:false},
       plugins:{
         legend:{position:"top"},
-        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${moneyLabel(ctx.raw)}`}}
+        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${hideValues?"R$ ***,**":brl(ctx.raw)}`}}
       },
       scales:{
         y:{ticks:{callback:(v)=>moneyTick(v)}}
@@ -165,7 +144,7 @@ export function renderMonthlyChart(canvas,labels,inVals,outVals){
       interaction:{mode:"index",intersect:false},
       plugins:{
         legend:{position:"top"},
-        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${moneyLabel(ctx.raw)}`}}
+        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${hideValues?"R$ ***,**":brl(ctx.raw)}`}}
       },
       scales:{
         y:{ticks:{callback:(v)=>moneyTick(v)}}
