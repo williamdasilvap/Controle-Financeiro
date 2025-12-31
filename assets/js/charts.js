@@ -10,8 +10,6 @@ const PALETTE=[
   "rgba(214,51,132,.70)","rgba(108,117,125,.70)"
 ];
 
-function moneyTick(v){ return brl(v).replace(",00",""); }
-
 export function destroyCharts(){
   if(chartCat) chartCat.destroy();
   if(chartDaily) chartDaily.destroy();
@@ -34,9 +32,9 @@ export function renderCategoryChart(canvas,labels,values){
         tooltip:{
           callbacks:{
             label:(ctx)=>{
-              const total = (ctx.dataset.data||[]).reduce((a,b)=>a+Number(b||0),0) || 0;
-              const val = Number(ctx.raw||0);
-              const pct = total>0 ? ((val/total)*100).toFixed(1) : "0.0";
+              const val=Number(ctx.raw||0);
+              const total=(ctx.dataset.data||[]).reduce((a,b)=>a+Number(b||0),0);
+              const pct= total>0 ? ((val/total)*100).toFixed(1) : "0.0";
               return `${ctx.label}: ${brl(val)} (${pct}%)`;
             }
           }
@@ -56,9 +54,7 @@ export function renderDailyChart(canvas,labels,inVals,outVals,balanceVals){
       tension:.35,
       fill:true,
       borderWidth:2,
-      borderColor:"rgba(25,135,84,.9)",
-      backgroundColor:"rgba(25,135,84,.18)",
-      pointRadius:2
+      pointRadius:0
     },
     {
       label:"Saídas",
@@ -66,9 +62,7 @@ export function renderDailyChart(canvas,labels,inVals,outVals,balanceVals){
       tension:.35,
       fill:true,
       borderWidth:2,
-      borderColor:"rgba(220,53,69,.9)",
-      backgroundColor:"rgba(220,53,69,.14)",
-      pointRadius:2
+      pointRadius:0
     }
   ];
 
@@ -76,13 +70,11 @@ export function renderDailyChart(canvas,labels,inVals,outVals,balanceVals){
     datasets.push({
       label:"Saldo (acumulado)",
       data:balanceVals,
-      tension:.25,
+      tension:.2,
       fill:false,
       borderWidth:3,
       borderDash:[6,6],
-      borderColor:"rgba(13,110,253,.95)",
-      pointRadius:0,
-      yAxisID:"y"
+      pointRadius:0
     });
   }
 
@@ -91,13 +83,9 @@ export function renderDailyChart(canvas,labels,inVals,outVals,balanceVals){
     data:{labels,datasets},
     options:{
       responsive:true,
-      interaction:{mode:"index",intersect:false},
-      plugins:{
-        legend:{position:"top"},
-        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${brl(ctx.raw)}`}}
-      },
+      plugins:{legend:{position:"top"}},
       scales:{
-        y:{ticks:{callback:(v)=>moneyTick(v)}}
+        y:{ticks:{callback:(v)=>brl(v).replace(",00","")}}
       }
     }
   });
@@ -106,45 +94,32 @@ export function renderDailyChart(canvas,labels,inVals,outVals,balanceVals){
 export function renderMonthlyChart(canvas,labels,inVals,outVals){
   if(chartMonths) chartMonths.destroy();
 
-  const netVals = labels.map((_,i)=>Math.round((Number(inVals[i]||0) - Number(outVals[i]||0))));
+  const saldoVals = labels.map((_,i)=>Math.round((Number(inVals[i]||0)) - (Number(outVals[i]||0))));
 
   chartMonths=new Chart(canvas,{
-    type:"bar",
     data:{
       labels,
       datasets:[
-        {
-          label:"Entradas",
-          data:inVals,
-          backgroundColor:"rgba(25,135,84,.55)",
-          borderWidth:0
-        },
-        {
-          label:"Saídas",
-          data:outVals,
-          backgroundColor:"rgba(220,53,69,.50)",
-          borderWidth:0
-        },
-        {
-          type:"line",
-          label:"Saldo do mês (entradas - saídas)",
-          data:netVals,
-          borderColor:"rgba(13,110,253,.95)",
-          borderWidth:3,
-          pointRadius:2,
-          tension:.25
-        }
+        {type:"bar", label:"Entradas", data:inVals},
+        {type:"bar", label:"Saídas", data:outVals},
+        {type:"line", label:"Saldo do mês", data:saldoVals, tension:.25, fill:false, borderWidth:3, pointRadius:0}
       ]
     },
     options:{
       responsive:true,
-      interaction:{mode:"index",intersect:false},
       plugins:{
         legend:{position:"top"},
-        tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${brl(ctx.raw)}`}}
+        tooltip:{
+          callbacks:{
+            label:(ctx)=>{
+              const v=Number(ctx.raw||0);
+              return `${ctx.dataset.label}: ${brl(v)}`;
+            }
+          }
+        }
       },
       scales:{
-        y:{ticks:{callback:(v)=>moneyTick(v)}}
+        y:{ticks:{callback:(v)=>brl(v).replace(",00","")}}
       }
     }
   });
