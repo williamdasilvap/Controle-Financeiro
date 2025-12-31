@@ -122,7 +122,7 @@
 
       <div class="card glass mt-3">
         <div class="card-header bg-transparent border-0 pb-0">
-          <div class="fw-semibold">Top gastos do mês</div>
+          <div class="fw-semibold">Maiores gastos do mês</div>
           <div class="small text-secondary">maiores saídas (mês selecionado)</div>
         </div>
         <div class="card-body pt-2">
@@ -137,24 +137,12 @@
         </div>
         <div class="card-body pt-2">
           <div id="catBars" class="d-flex flex-column gap-2 mt-2"></div>
-          <div class="mt-3 d-flex flex-column gap-2" id="catList"></div>
+          
         </div>
       </div>
 
-      <div class="card glass mt-3">
-        <div class="card-header bg-transparent border-0 pb-0 d-flex justify-content-between align-items-center">
-          <div>
-            <div class="fw-semibold">Entradas x Saídas</div>
-            <div class="small text-secondary">últimos dias</div>
-          </div>
-          <button class="btn btn-sm btn-outline-secondary" id="btnToday"><i class="bi bi-arrow-counterclockwise"></i></button>
-        </div>
-        <div class="card-body pt-2">
-          <div id="dailyBars" class="d-flex flex-column gap-2"></div>
-        </div>
-      </div>
-
-      <div class="card glass mt-3">
+      
+<div class="card glass mt-3">
         <div class="card-header bg-transparent border-0 pb-0">
           <div class="fw-semibold">Gastos (últimos 6 meses)</div>
           <div class="small text-secondary">comparativo por mês</div>
@@ -180,6 +168,11 @@
           <i class="bi bi-calculator"></i>
           <span class="small fw-semibold" id="saldoModeLabel">Saldo real</span>
         </button>
+        <button class="pill" id="btnToggleSaldoTx" type="button" title="Mostrar/ocultar saldo">
+          <i class="bi bi-eye"></i>
+          <span class="small fw-semibold">saldo</span>
+        </button>
+
 
         <div class="pill">
           <i class="bi bi-calculator"></i>

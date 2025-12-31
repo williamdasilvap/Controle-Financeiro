@@ -4,7 +4,22 @@ import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./
 const $ = (id) => document.getElementById(id);
 
 // ==============================
+// Fix iOS/PWA: viewport dinâmico (rodapé não "sobe")
+// ==============================
+function syncVisualViewportHeight(){
+  const h = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty('--vvh', `${h}px`);
+}
+syncVisualViewportHeight();
+window.addEventListener("resize", syncVisualViewportHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncVisualViewportHeight);
+  window.visualViewport.addEventListener("scroll", syncVisualViewportHeight);
+}
+
+// ==============================
 // Preferências (tema / privacidade)
+ (tema / privacidade)
 // ==============================
 const PREF_THEME_KEY = "cf_theme";
 const PREF_HIDE_SALDO_KEY = "cf_hide_saldo";
@@ -17,6 +32,10 @@ function maskedBRL(v) {
   return hideSaldo ? "R$ *,**" : brl(v);
 }
 
+function maskedSigned(v){
+  return hideSaldo ? "R$ *,**" : brl(v);
+}
+
 function setHideSaldo(next) {
   hideSaldo = !!next;
   localStorage.setItem(PREF_HIDE_SALDO_KEY, hideSaldo ? "1" : "0");
@@ -25,9 +44,10 @@ function setHideSaldo(next) {
 }
 
 function updateSaldoEyeUI() {
-  const btn = $("btnToggleSaldo");
-  if (!btn) return;
-  btn.innerHTML = hideSaldo ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+  const btn1 = $("btnToggleSaldo");
+  const btn2 = $("btnToggleSaldoTx");
+  if (btn1) btn1.innerHTML = hideSaldo ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
+  if (btn2) btn2.innerHTML = hideSaldo ? '<i class="bi bi-eye"></i>' : '<i class="bi bi-eye-slash"></i>';
 }
 
 function setSaldoMode(next) {
@@ -444,77 +464,6 @@ function renderCategory() {
       `;
     }).join("") || `<div class="small text-secondary">Sem gastos no mês.</div>`;
   }
-
-  const list = $("catList");
-  if (list) {
-    list.innerHTML = sorted.slice(0, 10).map(([c, v]) => `
-      <div class="tx-item">
-        <div class="d-flex justify-content-between align-items-center">
-          <div class="fw-semibold">${escapeHtml(c)}</div>
-          <div class="fw-semibold">${brl(v)}</div>
-        </div>
-      </div>
-    `).join("") || `<div class="small text-secondary">Sem gastos no mês.</div>`;
-  }
-}
-
-function renderDaily() {
-  const wrap = $("dailyBars");
-  if (!wrap) return;
-
-  // últimos 14 dias (visual mais “limpo”)
-  const now = new Date();
-  const days = [];
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    days.push(ymd(d));
-  }
-
-  const inMap = new Map(days.map(d => [d, 0]));
-  const outMap = new Map(days.map(d => [d, 0]));
-
-  for (const t of state.transactions) {
-    if (!inMap.has(t.date)) continue;
-    const v = Math.abs(Number(t.amount || 0));
-    if (t.type === "IN") inMap.set(t.date, inMap.get(t.date) + v);
-    else outMap.set(t.date, outMap.get(t.date) + v);
-  }
-
-  const max = Math.max(
-    ...days.map(d => (inMap.get(d) || 0) + (outMap.get(d) || 0)),
-    1
-  );
-
-  wrap.innerHTML = days.map(d => {
-    const vin = inMap.get(d) || 0;
-    const vout = outMap.get(d) || 0;
-    const pin = Math.round((vin / max) * 100);
-    const pout = Math.round((vout / max) * 100);
-
-    return `
-      <div class="tx-item">
-        <div class="d-flex justify-content-between align-items-center">
-          <div class="fw-semibold">${humanDate(d)}</div>
-          <div class="small text-secondary">IN ${brl(vin)} • OUT ${brl(vout)}</div>
-        </div>
-
-        <div class="mt-2">
-          <div class="small text-secondary">Entradas</div>
-          <div class="progress" style="height:10px;border-radius:999px;">
-            <div class="progress-bar bg-success" style="width:${pin}%"></div>
-          </div>
-        </div>
-
-        <div class="mt-2">
-          <div class="small text-secondary">Saídas</div>
-          <div class="progress" style="height:10px;border-radius:999px;">
-            <div class="progress-bar bg-danger" style="width:${pout}%"></div>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join("");
 }
 
 function renderMonthly() {
@@ -621,7 +570,7 @@ function renderTxList() {
   $("txCount").textContent = `${listDesc.length} itens`;
   let sum = 0;
   for (const t of listAsc) sum += signedAmount(t);
-  $("txSum").textContent = brl(sum);
+  $("txSum").textContent = maskedSigned(sum);
   $("txRangeLabel").textContent = activePeriodLabel();
 
   const start = periodStartDate();
@@ -677,7 +626,7 @@ function renderTxList() {
       <div class="tx-day-head">
         <div>
           <div class="fw-semibold">${humanDate(day)}</div>
-          <div class="small text-secondary">Movimento do dia: <span class="${daySum >= 0 ? "text-success" : "text-danger"}">${brl(daySum)}</span></div>
+          <div class="small text-secondary">Movimento do dia: <span class="${daySum >= 0 ? "text-success" : "text-danger"}">${maskedSigned(daySum)}</span></div>
         </div>
         <div class="text-end">
           <div class="small text-secondary">Saldo</div>
@@ -1150,7 +1099,6 @@ function refreshAll() {
   renderKPIs();
   renderTxList();
   renderCategory();
-  renderDaily();
   renderMonthly();
   renderBudgets();
   renderBudgetAlerts();
@@ -1212,11 +1160,6 @@ function setup() {
     resetState();
     state = emptyState();
     persistAndRefresh("Dados zerados.");
-  });
-
-  $("btnToday").addEventListener("click", () => {
-    $("monthSelect").value = mm;
-    refreshAll();
   });
 
   $("btnToggleSaldo")?.addEventListener("click", () => setHideSaldo(!hideSaldo));
