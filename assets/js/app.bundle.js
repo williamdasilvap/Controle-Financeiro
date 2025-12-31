@@ -1188,9 +1188,10 @@ function setup() {
   refreshAll();
 }
 
-setupTheme();
-setupNav();
-setupFilters();
-setup();
-showView("home");
-
+document.addEventListener("DOMContentLoaded", () => {
+  setupTheme();
+  setupNav();
+  setupFilters();
+  setup();
+  showView("home");
+});
