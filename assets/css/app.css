@@ -6,8 +6,8 @@
   --shadow: 0 16px 48px rgba(0,0,0,.10);
 }
 body{
-  min-height: var(--vvh, 100vh);
-  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  min-height: 100vh;
+  padding-bottom: 96px;
   background:
     radial-gradient(1000px 600px at 10% 0%, rgba(13,110,253,.12), transparent 60%),
     radial-gradient(900px 600px at 95% 10%, rgba(25,135,84,.10), transparent 55%),
@@ -141,8 +141,6 @@ html[data-bs-theme="dark"] .tx-badge{
 }
 .bottom-nav{
   position: fixed;
-  transform: translate3d(0,0,0);
-  will-change: transform;
   left: 0;
   right: 0;
   bottom: 0;
