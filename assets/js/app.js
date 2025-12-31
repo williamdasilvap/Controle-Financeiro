@@ -1,6 +1,6 @@
 import { loadState, saveState, resetState } from "./storage.js";
 import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./format.js";
-import { destroyCharts, renderCategoryChart, renderDailyChart, renderMonthlyChart, setChartsPrivacy } from "./charts.js";
+import { destroyCharts, renderDailyChart, renderMonthlyChart, setChartsPrivacy } from "./charts.js";
 const $=(id)=>document.getElementById(id);
 
 // ==============================
@@ -324,11 +324,34 @@ function renderCategory(){
     map.set(c,(map.get(c)||0)+Math.abs(Number(t.amount||0)));
   }
   const sorted=Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10);
-  renderCategoryChart($("chartCat"), sorted.map(x=>x[0]), sorted.map(x=>Math.round(x[1])));
-  $("catList").innerHTML=sorted.map(([c,v])=>`
-    <div class="tx-item"><div class="d-flex align-items-center justify-content-between">
-      <div class="fw-semibold">${escapeHtml(c)}</div><div class="fw-semibold">${moneyText(v)}</div>
-    </div></div>`).join("") || `<div class="small text-secondary">Sem gastos no mês.</div>`;
+
+  // "Gráfico" em Bootstrap: barra de participação (percentual) + descrição abaixo
+  const host = $("catBars");
+  if(!host) return;
+  const total = sorted.reduce((a,[_c,v])=>a+Number(v||0),0);
+
+  const VARIANTS=["bg-primary","bg-success","bg-danger","bg-warning","bg-info","bg-secondary","bg-dark"];
+
+  if(!sorted.length || total<=0){
+    host.innerHTML = `<div class="small text-secondary">Sem gastos no mês.</div>`;
+    return;
+  }
+
+  host.innerHTML = sorted.map(([c,v],i)=>{
+    const pct = Math.max(0, Math.round((Number(v||0) / total) * 100));
+    const barClass = VARIANTS[i % VARIANTS.length];
+    return `
+      <div class="mb-3">
+        <div class="progress" role="progressbar" aria-label="${escapeHtml(c)}" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" style="height: 12px;">
+          <div class="progress-bar ${barClass}" style="width: ${pct}%"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-1">
+          <div class="small fw-semibold">${escapeHtml(c)}</div>
+          <div class="small text-secondary">${moneyText(v)} • ${pct}%</div>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 function renderDaily(){
