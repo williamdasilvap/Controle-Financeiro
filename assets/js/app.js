@@ -316,6 +316,72 @@ function renderBudgets(){
     btn.addEventListener("click", ()=>openBudgetModal(btn.getAttribute("data-bedit")));
   });
 }
+
+
+function renderBudgetAlerts(){
+  const box=$("budgetAlerts");
+  const list=$("budgetAlertList");
+  if(!box || !list) return;
+
+  const spentMap=monthSpentByCategory();
+  if(!state.budgets.length){
+    box.textContent="Nenhuma meta cadastrada ainda.";
+    list.innerHTML="";
+    return;
+  }
+
+  const alerts=[];
+  for(const b of state.budgets){
+    const spent=spentMap.get(b.cat)||0;
+    const limit=Math.max(0, Number(b.limit||0));
+    const pct = limit>0 ? (spent/limit)*100 : 0;
+    if(pct>=100) alerts.push({level:"danger",txt:`${b.cat}: estourou (${Math.round(pct)}%)`,spent,limit});
+    else if(pct>=80) alerts.push({level:"warning",txt:`${b.cat}: atenção (${Math.round(pct)}%)`,spent,limit});
+  }
+
+  if(!alerts.length){
+    box.textContent="Tudo ok: nenhuma meta passou de 80% no mês selecionado.";
+    list.innerHTML="";
+    return;
+  }
+
+  box.textContent=`Você tem ${alerts.length} alerta(s) de meta no mês selecionado.`;
+  list.innerHTML = alerts.map(a=>`
+    <div class="tx-item">
+      <div class="d-flex justify-content-between align-items-center gap-2">
+        <div class="fw-semibold">${escapeHtml(a.txt)}</div>
+        <span class="badge bg-${a.level}">${brl(a.spent)} / ${brl(a.limit)}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderTopExpenses(){
+  const wrap=$("topOutList");
+  if(!wrap) return;
+  const monthTx=monthFilteredTx().filter(t=>t.type==="OUT")
+    .slice()
+    .sort((a,b)=>Number(b.amount||0)-Number(a.amount||0))
+    .slice(0,5);
+
+  if(!monthTx.length){
+    wrap.innerHTML = `<div class="small text-secondary">Sem gastos no mês.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = monthTx.map((t,i)=>`
+    <div class="tx-item">
+      <div class="d-flex justify-content-between gap-2">
+        <div>
+          <div class="fw-semibold">${i+1}. ${escapeHtml(t.desc)}</div>
+          <div class="small text-secondary">${humanDate(t.date)} • <span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
+        </div>
+        <div class="fw-semibold text-danger">${brl(Math.abs(Number(t.amount||0)))}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
 function openBudgetModal(id){
   ensureBudgetCatSelect();
   const modalEl=$("modalBudget");
@@ -343,7 +409,7 @@ function saveBudgetFromModal(){
   bootstrap.Modal.getInstance($("modalBudget"))?.hide();
 }
 
-function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderDaily(); renderMonthly(); renderBudgets(); }
+function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderDaily(); renderMonthly(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
 function persistAndRefresh(msg){ saveState(state); rebuildMonthSelect(); ensureCatSelect(); refreshAll(); if(msg) toast(msg); }
 
 function openModalNew(){
@@ -438,6 +504,7 @@ function setupNav(){
   });
   $("btnAddBudget")?.addEventListener("click", ()=>openBudgetModal());
   $("btnBudgetNew")?.addEventListener("click", ()=>openBudgetModal());
+  $("btnGoBudgets")?.addEventListener("click", ()=>showView("budgets"));
   $("btnSaveBudget")?.addEventListener("click", saveBudgetFromModal);
 
 }

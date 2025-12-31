@@ -202,22 +202,22 @@ html[data-bs-theme="dark"] .bottom-nav{
 .tx-day{
   border: 1px solid var(--bd2);
   border-radius: 18px;
-  background: rgba(255,255,255,55);
+  background: rgba(255,255,255,.55);
   overflow: hidden;
 }
 html[data-bs-theme="dark"] .tx-day{
-  border-color: rgba(255,255,255,12);
-  background: rgba(0,0,0,22);
+  border-color: rgba(255,255,255,.12);
+  background: rgba(0,0,0,.22);
 }
 .tx-day-head{
   display:flex;
   justify-content:space-between;
   gap: 10px;
   padding: 12px;
-  background: rgba(0,0,0,03);
+  background: rgba(0,0,0,.03);
 }
 html[data-bs-theme="dark"] .tx-day-head{
-  background: rgba(255,255,255,06);
+  background: rgba(255,255,255,.06);
 }
 .tx-day-body{
   display:flex;
