@@ -1,7 +1,45 @@
 import { loadState, saveState, resetState } from "./storage.js";
 import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./format.js";
-import { destroyCharts, renderCategoryChart, renderDailyChart, renderMonthlyChart } from "./charts.js";
+import { destroyCharts, renderCategoryChart, renderDailyChart, renderMonthlyChart, setChartsPrivacy } from "./charts.js";
 const $=(id)=>document.getElementById(id);
+
+// ==============================
+// Modo privacidade (ocultar valores)
+// ==============================
+const PRIVACY_KEY = "financas_privacy_hide_values";
+let hideValues = false;
+function loadPrivacy(){
+  try{ hideValues = localStorage.getItem(PRIVACY_KEY)==="1"; } catch { hideValues=false; }
+  setChartsPrivacy(hideValues);
+}
+function savePrivacy(){
+  try{ localStorage.setItem(PRIVACY_KEY, hideValues?"1":"0"); } catch {}
+  setChartsPrivacy(hideValues);
+}
+function moneyText(v){
+  return hideValues ? "R$ ***,**" : brl(v);
+}
+function applyPrivacyToInputs(){
+  // inputs de valor (no modal) viram password para mascarar
+  const tx=$("txAmount");
+  const bd=$("budgetLimit");
+  if(tx) tx.setAttribute("type", hideValues?"password":"text");
+  if(bd) bd.setAttribute("type", hideValues?"password":"text");
+}
+function renderPrivacyIcons(){
+  const icon = hideValues ? "bi-eye-slash" : "bi-eye";
+  const title = hideValues ? "Mostrar valores" : "Ocultar valores";
+  if($("btnPrivacy")) $("btnPrivacy").innerHTML = `<i class="bi ${icon}"></i>`;
+  if($("btnPrivacy")) $("btnPrivacy").setAttribute("title", title);
+  if($("bnPrivacy")) $("bnPrivacy").querySelector("i").className = `bi ${icon}`;
+}
+function togglePrivacy(){
+  hideValues = !hideValues;
+  savePrivacy();
+  renderPrivacyIcons();
+  applyPrivacyToInputs();
+  refreshAll();
+}
 
 const DEFAULT_CATS=["Salário","Freela","Venda","Investimentos","Moradia","Contas","Alimentação","Mercado","Transporte","Saúde","Educação","Lazer","Assinaturas","Compras","Outros"];
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).substring(2,10); }
@@ -134,7 +172,10 @@ function kpis(){
 }
 function renderKPIs(){
   const {ins,outs,net,saldo}=kpis();
-  $("kSaldo").textContent=brl(saldo); $("kIn").textContent=brl(ins); $("kOut").textContent=brl(outs); $("kNet").textContent=brl(net);
+  $("kSaldo").textContent=moneyText(saldo);
+  $("kIn").textContent=moneyText(ins);
+  $("kOut").textContent=moneyText(outs);
+  $("kNet").textContent=moneyText(net);
   setLastUpdate();
 }
 
@@ -164,7 +205,7 @@ function renderTxList(){
 
   $("txCount").textContent=`${listDesc.length} itens`;
   let sum=0; for(const t of listAsc) sum+=signedAmount(t);
-  $("txSum").textContent=brl(sum);
+  $("txSum").textContent=moneyText(sum);
   $("txRangeLabel").textContent=activePeriodLabel();
 
   // saldo anterior ao período (sempre calculado com TODOS os lançamentos, sem filtro de tipo/busca)
@@ -197,7 +238,7 @@ function renderTxList(){
         <div class="fw-semibold">Saldo anterior</div>
         <div class="small text-secondary">antes de ${humanDate(start)}</div>
       </div>
-      <div class="text-end fw-semibold">${brl(saldoAnterior)}</div>
+      <div class="text-end fw-semibold">${moneyText(saldoAnterior)}</div>
     </div>`;
   wrap.appendChild(head);
 
@@ -218,11 +259,11 @@ function renderTxList(){
       <div class="tx-day-head">
         <div>
           <div class="fw-semibold">${humanDate(day)}</div>
-          <div class="small text-secondary">Movimento do dia: <span class="${daySum>=0?"text-success":"text-danger"}">${brl(daySum)}</span></div>
+          <div class="small text-secondary">Movimento do dia: <span class="${daySum>=0?"text-success":"text-danger"}">${moneyText(daySum)}</span></div>
         </div>
         <div class="text-end">
           <div class="small text-secondary">Saldo</div>
-          <div class="fw-semibold">${brl(saldoDia)}</div>
+          <div class="fw-semibold">${moneyText(saldoDia)}</div>
         </div>
       </div>
       <div class="tx-day-body"></div>
@@ -249,7 +290,7 @@ function renderTxList(){
             </div>
           </div>
           <div class="text-end">
-            <div class="fw-semibold ${color}">${brl(val)}</div>
+            <div class="fw-semibold ${color}">${moneyText(val)}</div>
             <div class="d-flex justify-content-end gap-1 mt-1">
               <button class="btn btn-sm btn-outline-secondary" data-edit="${t.id}"><i class="bi bi-pencil"></i></button>
               <button class="btn btn-sm btn-outline-danger" data-del="${t.id}"><i class="bi bi-trash3"></i></button>
@@ -286,7 +327,7 @@ function renderCategory(){
   renderCategoryChart($("chartCat"), sorted.map(x=>x[0]), sorted.map(x=>Math.round(x[1])));
   $("catList").innerHTML=sorted.map(([c,v])=>`
     <div class="tx-item"><div class="d-flex align-items-center justify-content-between">
-      <div class="fw-semibold">${escapeHtml(c)}</div><div class="fw-semibold">${brl(v)}</div>
+      <div class="fw-semibold">${escapeHtml(c)}</div><div class="fw-semibold">${moneyText(v)}</div>
     </div></div>`).join("") || `<div class="small text-secondary">Sem gastos no mês.</div>`;
 }
 
@@ -360,7 +401,7 @@ function renderBudgets(){
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
             <div class="fw-semibold">${escapeHtml(b.cat)}</div>
-            <div class="small text-secondary">${brl(spent)} de ${brl(limit)} • <span class="badge-soft">${status}</span></div>
+            <div class="small text-secondary">${moneyText(spent)} de ${moneyText(limit)} • <span class="badge-soft">${status}</span></div>
           </div>
           <div class="d-flex gap-1">
             <button class="btn btn-sm btn-outline-secondary" data-bedit="${b.id}"><i class="bi bi-pencil"></i></button>
@@ -421,7 +462,7 @@ function renderBudgetAlerts(){
     <div class="tx-item">
       <div class="d-flex justify-content-between align-items-center gap-2">
         <div class="fw-semibold">${escapeHtml(a.txt)}</div>
-        <span class="badge bg-${a.level}">${brl(a.spent)} / ${brl(a.limit)}</span>
+        <span class="badge bg-${a.level}">${moneyText(a.spent)} / ${moneyText(a.limit)}</span>
       </div>
     </div>
   `).join("");
@@ -447,7 +488,7 @@ function renderTopExpenses(){
           <div class="fw-semibold">${i+1}. ${escapeHtml(t.desc)}</div>
           <div class="small text-secondary">${humanDate(t.date)} • <span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span></div>
         </div>
-        <div class="fw-semibold text-danger">${brl(Math.abs(Number(t.amount||0)))}</div>
+        <div class="fw-semibold text-danger">${moneyText(Math.abs(Number(t.amount||0)))}</div>
       </div>
     </div>
   `).join("");
@@ -691,6 +732,11 @@ function setupFilters(){
 
 }
 function setup(){
+  // preferências
+  loadPrivacy();
+  renderPrivacyIcons();
+  applyPrivacyToInputs();
+
   // Gera lançamentos recorrentes pendentes (antes de renderizar)
   applyRecurringUpToCurrentMonth();
 
@@ -700,6 +746,24 @@ function setup(){
 
   $("btnAddTx").addEventListener("click",openModalNew);
   $("btnSaveTx").addEventListener("click",saveTxFromModal);
+
+  // botão olho (ocultar/mostrar)
+  $("btnPrivacy")?.addEventListener("click",togglePrivacy);
+  $("bnPrivacy")?.addEventListener("click",togglePrivacy);
+
+  // olhos dos campos de valor (modais)
+  $("toggleTxAmount")?.addEventListener("click",()=>{
+    const el=$("txAmount");
+    if(!el) return;
+    const isPwd = el.getAttribute("type")==="password";
+    el.setAttribute("type", isPwd ? "text" : "password");
+  });
+  $("toggleBudgetLimit")?.addEventListener("click",()=>{
+    const el=$("budgetLimit");
+    if(!el) return;
+    const isPwd = el.getAttribute("type")==="password";
+    el.setAttribute("type", isPwd ? "text" : "password");
+  });
 
   // UI: mostrar/ocultar opções de recorrência
   if($("txRecurring")){
