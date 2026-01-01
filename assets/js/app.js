@@ -3,19 +3,20 @@ import { brl, ymd, humanDate, parseMoney, monthKeyFromYMD, monthLabel } from "./
 import { destroyCharts, setChartsPrivacy } from "./charts.js";
 const $=(id)=>document.getElementById(id);
 
+function awaitPromise(p){
+  try{
+    if(p && typeof p.then==="function"){ p.catch(()=>{}); }
+  }catch{}
+}
+
+
 // ==============================
 // Modo privacidade (ocultar valores)
 // ==============================
 const PRIVACY_KEY = "financas_privacy_hide_values";
-let hideValues = true;
+let hideValues = false;
 function loadPrivacy(){
-  // default: oculto (1ª vez). depois respeita o que estiver salvo.
-  try{
-    const v = localStorage.getItem(PRIVACY_KEY);
-    hideValues = (v===null) ? true : (v==="1");
-  }catch{
-    hideValues = true;
-  }
+  try{ hideValues = localStorage.getItem(PRIVACY_KEY)==="1"; } catch { hideValues=false; }
   setChartsPrivacy(hideValues);
 }
 function savePrivacy(){
@@ -49,12 +50,22 @@ function togglePrivacy(){
 
 const DEFAULT_CATS=["Salário","Freela","Venda","Investimentos","Moradia","Contas","Alimentação","Mercado","Transporte","Saúde","Educação","Lazer","Assinaturas","Compras","Outros"];
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).substring(2,10); }
-function emptyState(){ return {categories:[...DEFAULT_CATS],transactions:[],recurring:[]}; }
+function emptyState(){ return {categories:[...DEFAULT_CATS],transactions:[],recurring:[],budgets:[],templates:[],quickAdds:[]}; }
 let state=loadState()||emptyState();
 if(!Array.isArray(state.budgets)) state.budgets=[];
 if(!Array.isArray(state.categories)) state.categories=[...DEFAULT_CATS];
 if(!Array.isArray(state.transactions)) state.transactions=[];
 if(!Array.isArray(state.recurring)) state.recurring=[];
+if(!Array.isArray(state.templates)) state.templates=[];
+if(!Array.isArray(state.quickAdds) || !state.quickAdds.length){
+  // atalhos padrão (você pode editar depois no código, ou a gente cria UI de edição)
+  state.quickAdds=[
+    {id:uid(),label:"+ Mercado", type:"OUT", cat:"Mercado", desc:"Mercado", amount:0},
+    {id:uid(),label:"+ Uber", type:"OUT", cat:"Transporte", desc:"Uber", amount:0},
+    {id:uid(),label:"+ Lanche", type:"OUT", cat:"Alimentação", desc:"Lanche", amount:0}
+  ];
+}
+
 
 // filtros de período (YYYY-MM-DD)
 let filterFrom="";
@@ -349,7 +360,7 @@ function renderCategory(){
       <div class="mb-2">
         <div class="d-flex justify-content-between small">
           <div class="text-truncate me-2">${escapeHtml(cat)}</div>
-          <div>${moneyText(val)} <span class="text-secondary">(${pctTxt}%)</span></div>
+          <div>${pctTxt}%</div>
         </div>
         <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
           <div class="progress-bar" style="width:${pct}%"></div>
@@ -402,7 +413,7 @@ function renderMonthly(){
       <div class="mb-2">
         <div class="d-flex justify-content-between small">
           <div class="text-truncate me-2">${escapeHtml(it.label)}</div>
-          <div>${moneyText(it.val)} <span class="text-secondary">(${pctTxt}%)</span></div>
+          <div>${pctTxt}%</div>
         </div>
         <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
           <div class="progress-bar" style="width:${pct}%"></div>
@@ -412,6 +423,128 @@ function renderMonthly(){
   }).join("");
 }
 
+
+
+function applyCategoryChange(fromCat,toCat,{removeOld=false}={}){
+  const from=String(fromCat||"").trim();
+  const to=String(toCat||"").trim();
+  if(!from||!to) return {changed:false,msg:"Selecione as categorias."};
+  if(from===to) return {changed:false,msg:"Categorias iguais."};
+
+  // garante categoria destino
+  if(!state.categories.includes(to)) state.categories.push(to);
+
+  // aplica em lançamentos
+  for(const t of state.transactions){
+    if((t.cat||"Outros")===from) t.cat=to;
+  }
+  // metas
+  for(const b of state.budgets){
+    if((b.cat||"Outros")===from) b.cat=to;
+  }
+  // recorrências
+  for(const r of state.recurring){
+    if((r.cat||"Outros")===from) r.cat=to;
+  }
+  // modelos
+  for(const m of state.templates){
+    if((m.cat||"Outros")===from) m.cat=to;
+  }
+  // atalhos
+  for(const q of state.quickAdds){
+    if((q.cat||"Outros")===from) q.cat=to;
+  }
+
+  if(removeOld){
+    state.categories = state.categories.filter(c=>c!==from);
+  }
+  normalizeCategories();
+  return {changed:true,msg:`Categoria "${from}" → "${to}".`};
+}
+
+function renameCategory(fromCat,newName){
+  const from=String(fromCat||"").trim();
+  const to=String(newName||"").trim();
+  if(!from||!to) return {changed:false,msg:"Nome inválido."};
+  if(from===to) return {changed:false,msg:"Nada a mudar."};
+  const res=applyCategoryChange(from,to,{removeOld:true});
+  return res;
+}
+
+function refreshCatsUI(){
+  // selects do app
+  normalizeCategories();
+  rebuildMonthSelect(); // caso a lista de categorias mexa com metas/recorrências etc.
+  ensureCatSelect();
+  ensureBudgetCatSelect();
+  renderCategory();
+  renderBudgets();
+  renderBudgetAlerts();
+  renderTopExpenses();
+}
+
+function fillCatSelects(){
+  const fromSel=$("catFrom");
+  const toSel=$("catTo");
+  if(!fromSel||!toSel) return;
+  const opts=state.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  fromSel.innerHTML=opts;
+  toSel.innerHTML=opts;
+  // tenta manter seleção
+  if(!toSel.value && state.categories.length) toSel.value=state.categories[0];
+}
+function renderCatsManage(){
+  const wrap=$("catsManageList");
+  if(!wrap) return;
+  wrap.innerHTML = state.categories.map(cat=>{
+    const safe=escapeHtml(cat);
+    return `
+      <div class="tx-item">
+        <div class="d-flex justify-content-between align-items-center gap-2">
+          <div class="fw-semibold text-truncate">${safe}</div>
+          <div class="d-flex gap-1 flex-shrink-0">
+            <button class="btn btn-sm btn-outline-secondary" data-cat-rename="${safe}" title="Renomear"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger" data-cat-delete="${safe}" title="Excluir"><i class="bi bi-trash3"></i></button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  wrap.querySelectorAll("[data-cat-rename]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const from=btn.getAttribute("data-cat-rename");
+      const to=prompt(`Renomear categoria:\n\n${from}\n\nNovo nome:`, from);
+      if(to===null) return;
+      const res=renameCategory(from,to);
+      if(res.changed){
+        saveState(state);
+        fillCatSelects();
+        renderCatsManage();
+        refreshCatsUI();
+        toast(res.msg);
+      }else{
+        toast(res.msg);
+      }
+    });
+  });
+
+  wrap.querySelectorAll("[data-cat-delete]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const from=btn.getAttribute("data-cat-delete");
+      if(state.categories.length<=1) return toast("Você precisa ter pelo menos 1 categoria.");
+      // Pré-preenche o batch para o usuário escolher o destino
+      fillCatSelects();
+      if($("catFrom")) $("catFrom").value=from;
+      if($("catTo") && $("catTo").value===from){
+        const other=state.categories.find(c=>c!==from);
+        if(other) $("catTo").value=other;
+      }
+      $("catRemoveOld") && ($("catRemoveOld").checked=true);
+      toast('Escolha "Para" e clique em "Aplicar" para excluir/juntar.');
+    });
+  });
+}
 
 function ensureBudgetCatSelect(){
   const sel=$("budgetCat"); if(!sel) return;
@@ -467,7 +600,8 @@ function renderBudgets(){
       const id=btn.getAttribute("data-bdel");
       if(!confirm("Excluir esta meta?")) return;
       state.budgets = state.budgets.filter(x=>x.id!==id);
-      saveState(state); refreshAll(); toast("Meta removida.");
+      saveState(state); refreshAll();
+  awaitPromise(requirePinIfNeeded()); toast("Meta removida.");
     });
   });
   wrap.querySelectorAll("[data-bedit]").forEach(btn=>{
@@ -570,6 +704,89 @@ function saveBudgetFromModal(){
 function refreshAll(){renderKPIs(); renderTxList(); destroyCharts(); renderCategory(); renderMonthly(); renderBudgets(); renderBudgetAlerts(); renderTopExpenses(); }
 function persistAndRefresh(msg){ saveState(state); rebuildMonthSelect(); ensureCatSelect(); refreshAll(); if(msg) toast(msg); }
 
+
+function renderQuickAdds(){
+  const box=$("quickAdds");
+  if(!box) return;
+  box.innerHTML = (state.quickAdds||[]).map(q=>`
+    <button type="button" class="quick-btn" data-qa="${escapeHtml(q.id)}">${escapeHtml(q.label||q.desc||"+")}</button>
+  `).join("");
+  box.querySelectorAll("[data-qa]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const id=btn.getAttribute("data-qa");
+      const q=state.quickAdds.find(x=>x.id===id);
+      if(!q) return;
+      $("txType").value=q.type||"OUT";
+      if(q.desc) $("txDesc").value=q.desc;
+      if(q.cat) $("txCat").value=q.cat;
+      if(q.amount && Number(q.amount)>0){
+        const cur=$("txAmount").value.trim();
+        if(!cur) $("txAmount").value=String(q.amount).replace(".",",");
+      }
+    });
+  });
+}
+
+function renderTemplates(){
+  const wrap=$("templatesList");
+  if(!wrap) return;
+  if(!state.templates?.length){
+    wrap.innerHTML = `<div class="small text-secondary">Nenhum modelo ainda. Use "Salvar modelo" no lançamento.</div>`;
+    return;
+  }
+  wrap.innerHTML = state.templates.map(t=>`
+    <div class="template-card">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div>
+          <div class="fw-semibold">${escapeHtml(t.label||t.desc||"Modelo")}</div>
+          <div class="small text-secondary">${escapeHtml(t.type==="IN"?"Ganho":"Gasto")} • <span class="tx-badge">${escapeHtml(t.cat||"Outros")}</span> • ${moneyText(Number(t.amount||0))}</div>
+        </div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-sm btn-primary" data-tpl-use="${escapeHtml(t.id)}"><i class="bi bi-play-fill"></i></button>
+          <button class="btn btn-sm btn-outline-danger" data-tpl-del="${escapeHtml(t.id)}"><i class="bi bi-trash3"></i></button>
+        </div>
+      </div>
+    </div>
+  `).join("");
+
+  wrap.querySelectorAll("[data-tpl-use]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const id=btn.getAttribute("data-tpl-use");
+      const t=state.templates.find(x=>x.id===id);
+      if(!t) return;
+      openModalNew();
+      $("txType").value=t.type||"OUT";
+      $("txDesc").value=t.desc||"";
+      $("txAmount").value=String(Math.abs(Number(t.amount||0))).replace(".",",");
+      if(t.cat && state.categories.includes(t.cat)) $("txCat").value=t.cat;
+      // fecha o modal de modelos
+      bootstrap.Modal.getInstance($("modalTemplates"))?.hide();
+    });
+  });
+  wrap.querySelectorAll("[data-tpl-del]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const id=btn.getAttribute("data-tpl-del");
+      if(!confirm("Excluir este modelo?")) return;
+      state.templates = state.templates.filter(x=>x.id!==id);
+      saveState(state);
+      renderTemplates();
+      toast("Modelo removido.");
+    });
+  });
+}
+
+function saveAsTemplateFromModal(){
+  const type=$("txType").value;
+  const desc=$("txDesc").value.trim();
+  const amount=parseMoney($("txAmount").value);
+  const cat=$("txCat").value||"Outros";
+  if(!desc || !amount){ toast("Preencha descrição e valor para salvar modelo."); return; }
+  const label = prompt("Nome do modelo:", desc) || desc;
+  state.templates.push({id:uid(), label, type, desc, amount:Math.abs(amount), cat});
+  saveState(state);
+  toast("Modelo salvo.");
+}
+
 function openModalNew(){
   $("txModalTitle").textContent="Novo lançamento";
   $("txId").value=""; $("txDate").value=ymd(new Date()); $("txType").value="OUT";
@@ -582,6 +799,8 @@ function openModalNew(){
     $("txRecurringDay").value=String(new Date().getDate());
     $("txRecurringOpts")?.classList.add("d-none");
   }
+  renderQuickAdds();
+  renderQuickAdds();
   new bootstrap.Modal($("modalTx")).show();
 }
 function openEditModal(id){
@@ -690,34 +909,91 @@ async function restoreJson(file){
   state=obj; persistAndRefresh("Backup restaurado.");
 }
 
+
+// ==============================
+// PIN simples (bloqueio do app)
+// ==============================
+const PIN_HASH_KEY="financas_pin_hash";
+let pinUnlocked=false;
+
+async function hashPin(pin){
+  const enc=new TextEncoder().encode(String(pin));
+  if(crypto?.subtle?.digest){
+    const buf=await crypto.subtle.digest("SHA-256", enc);
+    const bytes=new Uint8Array(buf);
+    // base64
+    let bin=""; for(const b of bytes) bin+=String.fromCharCode(b);
+    return btoa(bin);
+  }
+  // fallback bem simples (não ideal, mas não quebra)
+  return String(pin).split("").reverse().join("") + "_";
+}
+function isPinEnabled(){
+  try{ return !!localStorage.getItem(PIN_HASH_KEY); }catch{ return false; }
+}
+function setUiLocked(locked){
+  document.querySelector("header.appbar")?.classList.toggle("d-none", locked);
+  document.querySelector("nav.bottom-nav")?.classList.toggle("d-none", locked);
+  document.querySelector("#btnAddTx")?.classList.toggle("d-none", locked);
+  document.querySelector("#main")?.classList.toggle("d-none", locked);
+}
+async function requirePinIfNeeded(){
+  if(!isPinEnabled()) return;
+  if(pinUnlocked) return;
+  setUiLocked(true);
+  const modalEl=$("modalUnlock");
+  const m=new bootstrap.Modal(modalEl);
+  $("pinEnter").value="";
+  $("pinErr").classList.add("d-none");
+  m.show();
+}
+async function tryUnlock(){
+  const pin=$("pinEnter").value.trim();
+  const saved=localStorage.getItem(PIN_HASH_KEY);
+  const h=await hashPin(pin);
+  if(saved && h===saved){
+    pinUnlocked=true;
+    $("pinErr").classList.add("d-none");
+    bootstrap.Modal.getInstance($("modalUnlock"))?.hide();
+    setUiLocked(false);
+    refreshAll();
+    toast("Desbloqueado.");
+  }else{
+    $("pinErr").classList.remove("d-none");
+  }
+}
+async function openPinSettings(){
+  $("pinNew").value=""; $("pinConfirm").value="";
+  new bootstrap.Modal($("modalPin")).show();
+}
+async function savePin(){
+  const a=$("pinNew").value.trim();
+  const b=$("pinConfirm").value.trim();
+  if(!/^\d{4,8}$/.test(a)) return toast("PIN deve ter 4 a 8 dígitos.");
+  if(a!==b) return toast("PIN e confirmação não batem.");
+  const h=await hashPin(a);
+  try{ localStorage.setItem(PIN_HASH_KEY,h); }catch{}
+  pinUnlocked=true;
+  toast("PIN salvo.");
+  bootstrap.Modal.getInstance($("modalPin"))?.hide();
+}
+function disablePin(){
+  if(!confirm("Desativar o PIN?")) return;
+  try{ localStorage.removeItem(PIN_HASH_KEY); }catch{}
+  pinUnlocked=true;
+  toast("PIN desativado.");
+  bootstrap.Modal.getInstance($("modalPin"))?.hide();
+}
+
 function setupTheme(){
-  const html=document.documentElement;
-  const THEME_KEY="financas_theme";
-
-  // aplica tema salvo (default: light)
-  try{
-    const saved = localStorage.getItem(THEME_KEY);
-    if(saved==="dark" || saved==="light"){
-      html.setAttribute("data-bs-theme", saved);
-    }
-  }catch{}
-
-  const applyIcon = ()=>{
-    const cur = html.getAttribute("data-bs-theme")==="dark" ? "dark" : "light";
-    if($("btnTheme")) $("btnTheme").innerHTML = cur==="dark" ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon-stars"></i>';
-    if($("bnTheme")) $("bnTheme").querySelector("i").className = cur==="dark" ? "bi bi-circle-half" : "bi bi-circle-half";
-  };
-
   const toggle=()=>{
+    const html=document.documentElement;
     const next=html.getAttribute("data-bs-theme")==="dark"?"light":"dark";
     html.setAttribute("data-bs-theme",next);
-    try{ localStorage.setItem(THEME_KEY, next); }catch{}
-    applyIcon();
+    $("btnTheme").innerHTML=next==="dark"?'<i class="bi bi-sun"></i>':'<i class="bi bi-moon-stars"></i>';
   };
-
-  $("btnTheme")?.addEventListener("click",toggle);
-  $("bnTheme")?.addEventListener("click",toggle);
-  applyIcon();
+  $("btnTheme").addEventListener("click",toggle);
+  $("bnTheme").addEventListener("click",toggle);
 }
 function showView(name){
   $("view-home").classList.toggle("d-none",name!=="home");
@@ -845,13 +1121,61 @@ function setup(){
   $("btnExport").addEventListener("click",exportCsv);
   $("btnBackup").addEventListener("click",backupJson);
 
+$("btnCats")?.addEventListener("click",()=>{
+  fillCatSelects();
+  renderCatsManage();
+  new bootstrap.Modal($("modalCats")).show();
+});
+$("btnTemplates")?.addEventListener("click",()=>{
+  renderTemplates();
+  new bootstrap.Modal($("modalTemplates")).show();
+});
+$("btnPin")?.addEventListener("click",()=>{
+  openPinSettings();
+});
+
+
   $("restoreFile").addEventListener("change",async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
     try{ await restoreJson(f); } catch(err){ toast("Falha ao restaurar."); console.error(err); }
     e.target.value="";
   });
 
-  $("btnReset").addEventListener("click",()=>{
+  
+$("btnAddCat")?.addEventListener("click",()=>{
+  const name=$("catNewName").value.trim();
+  if(!name) return;
+  if(!state.categories.includes(name)) state.categories.push(name);
+  normalizeCategories();
+  $("catNewName").value="";
+  saveState(state);
+  fillCatSelects();
+  renderCatsManage();
+  refreshCatsUI();
+  toast("Categoria adicionada.");
+});
+$("btnBatchCat")?.addEventListener("click",()=>{
+  const from=$("catFrom")?.value||"";
+  const to=$("catTo")?.value||"";
+  const removeOld=!!$("catRemoveOld")?.checked;
+  const res=applyCategoryChange(from,to,{removeOld});
+  if(res.changed){
+    saveState(state);
+    fillCatSelects();
+    renderCatsManage();
+    refreshCatsUI();
+    toast(res.msg);
+  }else toast(res.msg);
+});
+$("btnSaveAsTemplate")?.addEventListener("click", saveAsTemplateFromModal);
+
+// PIN
+$("btnSavePin")?.addEventListener("click", savePin);
+$("btnDisablePin")?.addEventListener("click", disablePin);
+$("btnUnlock")?.addEventListener("click", tryUnlock);
+$("pinEnter")?.addEventListener("keydown",(e)=>{ if(e.key==="Enter") tryUnlock(); });
+
+$("btnReset").addEventListener("click",()=>{
     if(!confirm("Zerar todos os dados salvos?")) return;
     resetState(); state=emptyState(); persistAndRefresh("Dados zerados.");
   });
