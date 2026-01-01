@@ -7,9 +7,15 @@ const $=(id)=>document.getElementById(id);
 // Modo privacidade (ocultar valores)
 // ==============================
 const PRIVACY_KEY = "financas_privacy_hide_values";
-let hideValues = false;
+let hideValues = true;
 function loadPrivacy(){
-  try{ hideValues = localStorage.getItem(PRIVACY_KEY)==="1"; } catch { hideValues=false; }
+  // default: oculto (1ª vez). depois respeita o que estiver salvo.
+  try{
+    const v = localStorage.getItem(PRIVACY_KEY);
+    hideValues = (v===null) ? true : (v==="1");
+  }catch{
+    hideValues = true;
+  }
   setChartsPrivacy(hideValues);
 }
 function savePrivacy(){
@@ -343,7 +349,7 @@ function renderCategory(){
       <div class="mb-2">
         <div class="d-flex justify-content-between small">
           <div class="text-truncate me-2">${escapeHtml(cat)}</div>
-          <div>${pctTxt}%</div>
+          <div>${moneyText(val)} <span class="text-secondary">(${pctTxt}%)</span></div>
         </div>
         <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
           <div class="progress-bar" style="width:${pct}%"></div>
@@ -396,7 +402,7 @@ function renderMonthly(){
       <div class="mb-2">
         <div class="d-flex justify-content-between small">
           <div class="text-truncate me-2">${escapeHtml(it.label)}</div>
-          <div>${pctTxt}%</div>
+          <div>${moneyText(it.val)} <span class="text-secondary">(${pctTxt}%)</span></div>
         </div>
         <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
           <div class="progress-bar" style="width:${pct}%"></div>
@@ -685,14 +691,33 @@ async function restoreJson(file){
 }
 
 function setupTheme(){
+  const html=document.documentElement;
+  const THEME_KEY="financas_theme";
+
+  // aplica tema salvo (default: light)
+  try{
+    const saved = localStorage.getItem(THEME_KEY);
+    if(saved==="dark" || saved==="light"){
+      html.setAttribute("data-bs-theme", saved);
+    }
+  }catch{}
+
+  const applyIcon = ()=>{
+    const cur = html.getAttribute("data-bs-theme")==="dark" ? "dark" : "light";
+    if($("btnTheme")) $("btnTheme").innerHTML = cur==="dark" ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon-stars"></i>';
+    if($("bnTheme")) $("bnTheme").querySelector("i").className = cur==="dark" ? "bi bi-circle-half" : "bi bi-circle-half";
+  };
+
   const toggle=()=>{
-    const html=document.documentElement;
     const next=html.getAttribute("data-bs-theme")==="dark"?"light":"dark";
     html.setAttribute("data-bs-theme",next);
-    $("btnTheme").innerHTML=next==="dark"?'<i class="bi bi-sun"></i>':'<i class="bi bi-moon-stars"></i>';
+    try{ localStorage.setItem(THEME_KEY, next); }catch{}
+    applyIcon();
   };
-  $("btnTheme").addEventListener("click",toggle);
-  $("bnTheme").addEventListener("click",toggle);
+
+  $("btnTheme")?.addEventListener("click",toggle);
+  $("bnTheme")?.addEventListener("click",toggle);
+  applyIcon();
 }
 function showView(name){
   $("view-home").classList.toggle("d-none",name!=="home");

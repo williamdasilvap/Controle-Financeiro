@@ -228,3 +228,9 @@ html[data-bs-theme="dark"] .tx-day-head{
 .tx-day-body .tx-item{
   margin: 0;
 }
+
+#topOutList{
+  display:flex;
+  flex-direction:column;
+  gap:.75rem;
+}
