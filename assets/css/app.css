@@ -234,3 +234,9 @@ html[data-bs-theme="dark"] .tx-day-head{
   flex-direction:column;
   gap:.75rem;
 }
+
+#budgetList{
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
